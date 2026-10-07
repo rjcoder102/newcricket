@@ -100,7 +100,7 @@ export const getDiamondEvents = async (req, res) => {
   console.log("getDiamondEvents")
   try {
     const response = await axios.get(
-      "https://scoreapi.nautical7.com/diamond/odds/4_848646734",
+      "https://scoreapi.nautical7.com/diamond/events/10",
       {
         headers: {
           "X-API-Key":
@@ -110,6 +110,39 @@ export const getDiamondEvents = async (req, res) => {
     );
 
     // console.log("response11111999", response.data)
+
+    return res.status(200).json({
+      success: true,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error(
+      "Diamond Events API Error:",
+      error.response?.data || error.message
+    );
+
+    return res.status(error.response?.status || 500).json({
+      success: false,
+      message: "Failed to fetch diamond events",
+      error: error.response?.data || error.message,
+    });
+  }
+};
+export const getDiamondEventsData = async (req, res) => {
+
+  console.log("getDiamondEvents")
+  try {
+    const response = await axios.get(
+      "https://scoreapi.nautical7.com/diamond/odds/10_894750581",
+      {
+        headers: {
+          "X-API-Key":
+            "sck_CZYAOnNE5fl8Mj-7w5KHtrEpuLEKVsPw",
+        },
+      }
+    );
+
+    console.log("response data", response.data)
 
     return res.status(200).json({
       success: true,

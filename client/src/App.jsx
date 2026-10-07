@@ -21,6 +21,7 @@ import OurVipCasino from './pages/Home/ourvipcasino/CasinoList';
 import OurVirtualCasino from './pages/Home/ourvirtual/CasinoList';
 import OurPremCasino from './pages/Home/ourpremcasino/CasinoList';
 import CasinoBet from './pages/CasinoBet/casinoBet';
+import HourseRacingBet from './pages/gamedetails/HourseRacingBet';
 function App() {
   return (
     <>
@@ -35,6 +36,7 @@ function App() {
             <Route path='cricket-bet/:game/:id' element={<CricketBet />} />
             <Route path='football-bet/:game/:id' element={<FootballBet />} />
             <Route path='tennis-bet/:game/:id' element={<TennisBet />} />
+            <Route path='hourse-racing-bet/:game/:id' element={<HourseRacingBet />} />
             <Route path='account-statement' element={<AccountStatement />} />
             <Route path='current-bets' element={<CurrentBets />} />
             <Route path='activity-log' element={<ActivityLog />} />

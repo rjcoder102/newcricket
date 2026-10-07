@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { FaRegPlusSquare } from 'react-icons/fa';
 import { FaRegMinusSquare } from 'react-icons/fa';
@@ -8,6 +8,8 @@ import { useSelector, useDispatch } from 'react-redux';
 import { fetchCricketData } from '../../redux/reducer/cricketSlice';
 import { fetchSoccerData } from '../../redux/reducer/soccerSlice';
 import { fetchTennisData } from '../../redux/reducer/tennisSlice';
+import { fetchHorseRacingData } from '../../redux/reducer/horseRacingSlice';
+import HorseRacing from '../../pages/Home/HorseRacing';
 
 function Sidebar({ isOpen, onClose }) {
   const navigate = useNavigate();
@@ -15,12 +17,35 @@ function Sidebar({ isOpen, onClose }) {
   const { matches: cricketMatches } = useSelector((state) => state.cricket);
   const { matches: tennisMatches } = useSelector((state) => state.tennis);
   const { matches: soccerMatches } = useSelector((state) => state.soccer);
+  const [showHorseRacing, setShowHorseRacing] = useState(false);
+  const [activeTab, setActiveTab] = useState('');
+  const horseRacingPanelRef = useRef(null);
 
   useEffect(() => {
     dispatch(fetchCricketData());
     dispatch(fetchTennisData());
     dispatch(fetchSoccerData());
+    dispatch(fetchHorseRacingData());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (!showHorseRacing) return;
+
+    const closeOnOutsideClick = (event) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        !horseRacingPanelRef.current?.contains(target) &&
+        !target.closest('[data-horse-racing-trigger]')
+      ) {
+        setShowHorseRacing(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () =>
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [showHorseRacing]);
 
   // Use Set to track expanded items by their unique IDs
   // This works dynamically with any data structure from API
@@ -197,7 +222,7 @@ function Sidebar({ isOpen, onClose }) {
 
       {/* Sidebar */}
       <aside
-        className={`sidebar-menu-bg sidebar-menu-text fixed top-0 left-0 z-50 mt-0.5 h-full w-55 transform transition-transform duration-300 ease-in-out lg:static ${
+        className={` sidebar-menu-bg sidebar-menu-text fixed top-0 left-0 z-50 mt-0.5 w-55 transform transition-transform duration-300 ease-in-out lg:static lg:relative ${
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         } overflow-y-auto`}
       >
@@ -223,18 +248,25 @@ function Sidebar({ isOpen, onClose }) {
             {isExpanded('racingSports') && (
               <div className=' '>
                 {racingSports.map((sport) => (
-                  <a
+                  <button
                     key={sport}
-                    href='#'
-                    className='block border-b border-b-[#9e9e9e] p-1 pl-4 text-sm font-[400] text-[#000000] transition-colors hover:opacity-70'
+                    type='button'
+                    data-horse-racing-trigger={
+                      sport === 'Horse Racing' ? '' : undefined
+                    }
+                    className='block w-full border-b border-b-[#9e9e9e] p-1 pl-4 text-left text-sm font-[400] text-[#000000] transition-colors hover:opacity-70'
+                    onClick={() => {
+                      if (sport === 'Horse Racing') {
+                        setShowHorseRacing((isOpen) => !isOpen);
+                      }
+                    }}
                   >
                     {sport}
-                  </a>
+                  </button>
                 ))}
               </div>
             )}
           </div>
-
           {/* Others Section */}
           <div className=''>
             <button
@@ -313,6 +345,14 @@ function Sidebar({ isOpen, onClose }) {
           </div>
         </div>
       </aside>
+      {showHorseRacing && (
+        <div
+          ref={horseRacingPanelRef}
+          className='fixed top-12 left-20 z-[99999] lg:top-40 lg:left-55'
+        >
+          <HorseRacing panel />
+        </div>
+      )}
     </>
   );
 }

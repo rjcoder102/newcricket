@@ -8,6 +8,8 @@ export const fetchTennisData = async (req, res) => {
   try {
     const data = await fetchMatchList(2);
 
+    console.log("tenis data", data)
+
     const t1Data = data.data.t1 || [];
     const t2Data = data.data.t2 || [];
 

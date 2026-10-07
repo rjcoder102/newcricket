@@ -9,6 +9,7 @@ import Football from './Football';
 import Tennis from './Tennis';
 import AllCasino from './ourcasino/AllCasino';
 import Crash from './crash/Crash';
+import HorseRacing from './HorseRacing';
 const tabs = [
   { name: 'Cricket' },
   { name: 'Football' },
@@ -90,6 +91,7 @@ function Home() {
           {activeTab === 'Cricket' && <Cricket />}
           {activeTab === 'Football' && <Football />}
           {activeTab === 'Tennis' && <Tennis />}
+          {activeTab === 'Horse Racing' && <HorseRacing />}
           <div className='mt-1'>
             <AllCasino />
           </div>

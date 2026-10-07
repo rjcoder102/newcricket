@@ -113,7 +113,7 @@ if (APP_TYPE !== 'dashboard') {
 const isLocal = process.env.NODE_ENV !== 'production';
 
 const PORT = isLocal
-  ? process.env.PORT || (APP_TYPE === 'dashboard' ? 8001 : 8000)
+  ? process.env.PORT || (APP_TYPE === 'dashboard' ? 8101 : 8100)
   : APP_TYPE === 'dashboard'
     ? process.env.DASHBOARD_PORT
     : process.env.CLIENT_PORT;

@@ -5,10 +5,14 @@ import { fetchMatchList, fetchMatchData } from '../services/matchApi/index.js';
 dotenv.config();
 
 export const fetchHorseRacingData = async (req, res) => {
+  console.log('Fetching horse racing data...');
   try {
     const data = await fetchMatchList(10);
 
+  
+
     const t1Data = data.data.t1 || [];
+      console.log('Horse Racing Data:', t1Data);
     const venues = [];
     for (const country of t1Data) {
       if (!country.children) continue;
