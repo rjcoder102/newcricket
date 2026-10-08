@@ -58,6 +58,36 @@ body {
   animation: blink 1.5s ease-in-out infinite;
 }
 
+@keyframes horse-odds-flash {
+  0%, 100% {
+    background-color: #dc2626;
+    color: #ffffff;
+  }
+  50% {
+    background-color: #fecaca;
+    color: #7f1d1d;
+  }
+}
+
+.horse-odds-changed {
+  animation: horse-odds-flash 0.4s ease-in-out 2;
+}
+
+@keyframes horse-no-data-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100vh);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.horse-no-data-popup {
+  animation: horse-no-data-slide-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 /* Desktop background override for casino categories */
 @media (min-width: 768px) {
   .md-desktop-bg {

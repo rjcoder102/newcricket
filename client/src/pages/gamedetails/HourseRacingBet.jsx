@@ -1,171 +1,109 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-// import { fetchHorseRacingBettingData } from '../../redux/reducer/horseRacingBetSlice';
-import { fetchHorseRacingBettingData } from '../../redux/reducer/horseRacingSlice';
-import MatchOdds from './MatchOdds';
-import Bookmaker from './Bookmaker';
-import TiedMatch from './TiedMatch';
-import Normal from './Normal';
-import Fancy1 from './Fancy1';
-import Khado from './Khado';
-import OddEven from './OddEven';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { FaHorse, FaTv } from 'react-icons/fa';
+import { toast } from 'react-toastify';
+import HorseRacingMarkets from './HorseRacingMarkets';
 import MatchedBet from './MatchedBet';
 import PlaceBet from './PlaceBet';
 import { getUser } from '../../redux/reducer/authReducer';
-import { useDispatch, useSelector } from 'react-redux';
-import { FaTv } from 'react-icons/fa6';
 import {
-  createBet,
-  createfancyBet,
+  fetchHorseRacingBettingData,
+} from '../../redux/reducer/horseRacingSlice';
+import {
   getPendingBet,
   getPendingBetAmo,
   messageClear,
 } from '../../redux/reducer/betReducer';
-import { toast } from 'react-toastify';
-import { host } from '../../redux/api';
-import { getLiveTvUrl } from '../../utils/liveTvUrl';
-import { getCricketScorecardUrl } from '../../utils/scorecardUrl';
-
 
 function HourseRacingBet() {
-  const { game, id } = useParams();
+  const { game, id: gameid } = useParams();
   const location = useLocation();
-  const time = location.state?.time;
-  const beventId = location.state?.beventId;
-  const gameid = id;
-  const match = game;
   const navigate = useNavigate();
+  const time = location.state?.time;
+  const venue = game || 'Horse Racing';
   const dispatch = useDispatch();
-  const [bettingData, setBettingData] = useState(null);
-  const [betOdds, setBetOdds] = useState(null);
-  const [betAmount, setBetAmount] = useState(0);
-  const [showodds, setshowodds] = useState(true);
+  const [showOdds, setShowOdds] = useState(true);
   const [selectedBet, setSelectedBet] = useState(null);
-  const { bettingData: horseRacingBettingData } = useSelector(
-    (state) => state.horseRacing
-  );
-
-//   console.log('Horse Racing Betting Data from Redux:', horseRacingBettingData); // Debugging line to check the betting data
+  const {
+    bettingData: storedBettingData,
+    bettingLoading,
+    bettingLoaded,
+    bettingError,
+    bettingGameId,
+  } = useSelector((state) => state.horseRacing);
   const { pendingBetAmounts, successMessage, errorMessage } = useSelector(
     (state) => state.bet
   );
-  const { userInfo } = useSelector((state) => state.auth);
-  const [formData, setFormData] = useState({
-    gameId: gameid,
-    sid: 10,
-    otype: '',
-    price: null,
-    xValue: '',
-    gameType: '',
-    gameName: 'Horse Racing',
-    teamName: '',
-  });
-  const [activeSubTab, setActiveSubTab] = useState('Normal');
-  const [item, setitem] = useState(null);
-  const [showLive, setShowLive] = useState(false);
-  const [showlivetv, setshowlivetv] = useState(false);
-  const streamGmid = beventId || gameid;
-  const liveTvUrl = getLiveTvUrl(streamGmid);
-  const scorecardUrl = getCricketScorecardUrl(streamGmid);
-
-  const subTabs = [
-    { id: 'Normal', name: 'ALL' },
-    { id: 'Fancy', name: 'Fancy' },
-    { id: 'line', name: 'Line Markets' },
-    { id: 'ball', name: 'Ball by Ball' },
-    { id: 'meter', name: 'Meter Markets' },
-    { id: 'khado', name: 'Khado Markets' },
-  ];
-  // Extract team names from match title
-  const matchTitle = decodeURIComponent(game || 'Team 1 v Team 2');
-  const teams = matchTitle.split(' v ');
-  const team1 = teams[0] || 'Team 1';
-  const team2 = teams[1] || 'Team 2';
-  console.log(showodds);
-
-  const handleBetSelect = (betData) => {
-    setSelectedBet(betData);
-  };
-
-  const handleBetChange = (updatedBet) => {
-    setSelectedBet(updatedBet);
-  };
+  const horseRacingDataMatchesRoute =
+    String(bettingGameId) === String(gameid);
+  const bettingData = horseRacingDataMatchesRoute ? storedBettingData : [];
+  const isBettingLoaded = horseRacingDataMatchesRoute && bettingLoaded;
+  const isBettingLoading =
+    !horseRacingDataMatchesRoute || bettingLoading;
+  const bettingDataError = horseRacingDataMatchesRoute ? bettingError : null;
+  const hasHorseRacingMarkets =
+    Array.isArray(bettingData) &&
+    bettingData.some(
+      (market) =>
+        Array.isArray(market?.section) &&
+        market.section.some((runner) => runner && (runner.nat || runner.tname))
+    );
 
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        setshowodds(true);
-      }
+    if (!gameid) return undefined;
+
+    let requestInProgress = false;
+    const refreshBettingData = () => {
+      if (requestInProgress) return;
+      requestInProgress = true;
+      dispatch(fetchHorseRacingBettingData(gameid)).finally(() => {
+        requestInProgress = false;
+      });
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // ✅ Fetch once before using socket (optional)
-  useEffect(() => {
-    if (gameid) {
-      dispatch(fetchHorseRacingBettingData(gameid));
-    }
+    refreshBettingData();
+    const intervalId = window.setInterval(refreshBettingData, 1000);
+    return () => window.clearInterval(intervalId);
   }, [dispatch, gameid]);
 
   useEffect(() => {
-    if (!gameid) return;
-    const socket = new WebSocket(host);
-    socket.onopen = () => {
-      socket.send(
-        JSON.stringify({
-          type: 'subscribe',
-          gameid,
-          apitype: 'horse-racing',
-          userId: userInfo?._id,
-        })
-      );
-    };
+    if (
+      !isBettingLoaded ||
+      bettingDataError ||
+      hasHorseRacingMarkets
+    ) {
+      return undefined;
+    }
 
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.gameid === gameid) {
-          setBettingData(message.data);
-        }
-      } catch (err) {
-        console.error('❌ Error parsing message:', err);
-      }
-    };
-
-    socket.onerror = (err) => {
-      console.error('❌ WebSocket error:', err);
-    };
-
-    socket.onclose = () => {
-      console.log('❌ WebSocket disconnected');
-    };
-
-    return () => socket.close();
-  }, [gameid, userInfo?._id]);
-
-  useEffect(() => {
-    setBettingData(horseRacingBettingData);
-  }, [horseRacingBettingData]);
+    const redirectTimer = window.setTimeout(() => navigate('/'), 2500);
+    return () => window.clearTimeout(redirectTimer);
+  }, [
+    isBettingLoaded,
+    bettingDataError,
+    hasHorseRacingMarkets,
+    navigate,
+  ]);
 
   useEffect(() => {
     dispatch(getUser());
   }, [dispatch]);
 
   useEffect(() => {
-    if (gameid) {
-      dispatch(getPendingBetAmo(gameid));
-      dispatch(getPendingBet(gameid));
-    }
+    if (!gameid) return;
+    dispatch(getPendingBetAmo(gameid));
+    dispatch(getPendingBet(gameid));
   }, [dispatch, gameid]);
 
-  // Show toast messages for success/error (centralized to prevent duplicates)
   useEffect(() => {
+    let clearSelectedBetTimer;
     if (successMessage) {
       toast.success(successMessage);
       dispatch(messageClear());
-      setSelectedBet(null);
+      clearSelectedBetTimer = window.setTimeout(
+        () => setSelectedBet(null),
+        0
+      );
       if (gameid) {
         dispatch(getPendingBetAmo(gameid));
         dispatch(getPendingBet(gameid));
@@ -175,345 +113,101 @@ function HourseRacingBet() {
       toast.error(errorMessage);
       dispatch(messageClear());
     }
+    return () => window.clearTimeout(clearSelectedBetTimer);
   }, [successMessage, errorMessage, dispatch, gameid]);
 
-  console.log('bettting data', bettingData);
-
-  const matchOddsList = Array.isArray(bettingData)
-    ? bettingData.filter(
-        (item) =>
-          item?.mname === 'MATCH_ODDS' || item?.mname === 'TOURNAMENT_WINNER'
-      )
-    : [];
-
-  console.log('matchodds from cricketbet', matchOddsList);
-
-  const tiedMatchList = Array.isArray(bettingData)
-    ? bettingData.filter(
-        (item) =>
-          item?.mname === 'Tied Match' || item?.mname === 'Bookmaker IPL CUP'
-      )
-    : [];
-
-  const newtiedMatchList = Array.isArray(bettingData)
-    ? bettingData.filter((item) => item?.mname === 'TIED_MATCH')
-    : [];
-
-  const BookmakerList = Array.isArray(bettingData)
-    ? bettingData.filter((item) => item.mname === 'Bookmaker')
-    : [];
-
-  const fancy1List = bettingData?.filter((item) => item.mname === 'fancy1');
-
-  const fancy1Data =
-    Array.isArray(fancy1List) && fancy1List.length > 0 && fancy1List[0].section
-      ? fancy1List[0].section.map((sec) => ({
-          team: sec.nat,
-          sid: sec.sid,
-          odds: sec.odds,
-          max: sec.max,
-          min: sec.min,
-          mname: fancy1List[0].mname, // ✅ Access from first item
-          status: fancy1List[0].status, // ✅ Access from first item
-        }))
-      : [];
-
-  console.log('fancy1Data from cricketbet', fancy1Data);
-
-  const NormalList = bettingData?.filter((item) => item.mname === 'Normal');
-  const NormalData =
-    Array.isArray(NormalList) && NormalList.length > 0 && NormalList[0].section
-      ? NormalList[0].section.map((sec) => ({
-          team: sec.nat,
-          sid: sec.sid,
-          odds: sec.odds,
-          max: sec.max,
-          min: sec.min,
-          mname: NormalList[0].mname, // ✅ Access from first item
-          status: sec.gstatus, // ✅ Access from first item
-        }))
-      : [];
-
-  console.log('NormalData from cricketbet', NormalList);
-
-  const khadoList = bettingData?.filter((item) => item.mname === 'khado');
-  const khadoData =
-    Array.isArray(khadoList) && khadoList.length > 0 && khadoList[0].section
-      ? khadoList[0].section.map((sec) => ({
-          team: sec.nat,
-          sid: sec.sid,
-          odds: sec.odds,
-          max: sec.max,
-          min: sec.min,
-          mname: khadoList[0].mname, // ✅ Access from first item
-          status: sec.gstatus, // ✅ Access from first item
-        }))
-      : [];
-
-  console.log('khadoData from cricketbet', khadoData);
-
-  const oddEvenList = bettingData?.filter((item) => item.mname === 'oddeven');
-  const oddEvenData =
-    Array.isArray(oddEvenList) &&
-    oddEvenList.length > 0 &&
-    oddEvenList[0].section
-      ? oddEvenList[0].section.map((sec) => ({
-          team: sec.nat,
-          sid: sec.sid,
-          odds: sec.odds,
-          max: sec.max,
-          min: sec.min,
-          mname: oddEvenList[0].mname, // ✅ Access from first item
-          status: sec.gstatus, // ✅ Access from first item
-        }))
-      : [];
-
-  console.log('oddEvenData from cricketbet', oddEvenData);
+  const renderPlaceBet = (isMobile = false) => (
+    <PlaceBet
+      selectedBet={selectedBet}
+      onBetChange={setSelectedBet}
+      onClose={() => setSelectedBet(null)}
+      isMobile={isMobile}
+      team1={venue}
+      team2='Horse Racing'
+      item={null}
+      gameId={gameid}
+      eventName={venue}
+      sid={10}
+      marketName={selectedBet?.marketName}
+      gameType={selectedBet?.gameType}
+      gameName='Horse Racing'
+      maxAmount={selectedBet?.maxAmount}
+      minAmount={selectedBet?.minAmount}
+    />
+  );
 
   return (
-    <div className='mt-0.5 flex gap-px'>
-      <div className='ml-0 w-full md:ml-1 lg:w-[calc(100%-352px)]'>
-        <div className='bg-secondary text-secondary flex items-center justify-between p-1 text-[12px] font-bold lg:text-[15px]'>
-          <span>{game}</span>
-          <span>{time}</span>
+    <div className='mt-0.5 flex min-w-0 gap-px'>
+      <main className='ml-0 min-w-0 w-full md:ml-1 lg:w-[calc(100%-352px)]'>
+        <div className='bg-secondary text-secondary flex items-center gap-2 p-2 text-sm font-bold'>
+          <FaHorse aria-hidden='true' />
+          <span>{venue}</span>
+          {time && <span className='ml-auto'>{time}</span>}
         </div>
-        <div className='bg-primary text-primary flex items-center justify-around text-[12px] font-bold lg:hidden'>
-          <div
-            className={`flex w-full items-center justify-center border-r border-r-[#FFFFFF] p-2 ${showodds ? 'border-t-2 border-t-[#cccccc]' : ''}`}
-            onClick={() => {
-              setshowodds(true);
-              setShowLive(false);
-            }}
+
+        <div className='bg-primary text-primary flex text-xs font-bold lg:hidden'>
+          <button
+            type='button'
+            className={`w-1/2 border-r border-white p-2 ${
+              showOdds ? 'border-t-2 border-t-white' : ''
+            }`}
+            onClick={() => setShowOdds(true)}
           >
             ODDS
-          </div>
-          <div
-            className={`flex w-full items-center justify-center border-r border-r-[#FFFFFF] p-2 ${showodds ? '' : 'border-t-2 border-t-[#cccccc]'}`}
-            onClick={() => setshowodds(false)}
+          </button>
+          <button
+            type='button'
+            className={`w-1/2 p-2 ${
+              showOdds ? '' : 'border-t-2 border-t-white'
+            }`}
+            onClick={() => setShowOdds(false)}
           >
             MATCHED BET
-          </div>
-          <div
-            className={`flex w-full cursor-pointer items-center justify-center p-2`}
-            onClick={() => {
-              setShowLive(true);
-              setshowodds(true);
-            }}
-          >
-            <FaTv className='text-sm' />
-          </div>
+          </button>
         </div>
 
-        {showodds && (
-          <div>
-            {!showLive && scorecardUrl && (
-              <iframe
-                src={scorecardUrl}
-                allowFullScreen
-                className='w-full'
-                title='Live Score'
-                allow='
-                        autoplay;
-                        encrypted-media;
-                        fullscreen;
-                        picture-in-picture;
-                        accelerometer;
-                        gyroscope
-                      '
-              />
-            )}
-            {showLive && liveTvUrl && (
-              <div className='w-full'>
-                <iframe
-                  src={liveTvUrl}
-                  title='Watch Live'
-                  className='w-full'
-                  style={{ height: '50vh' }}
-                  allowFullScreen
-                  loading='lazy'
-                  allow='
-                    autoplay;
-                    encrypted-media;
-                    fullscreen;
-                    picture-in-picture;
-                    accelerometer;
-                    gyroscope
-                  '
-                />
-              </div>
-            )}
-            {/** Match Odds */}
-            {matchOddsList.length > 0 && (
-              <MatchOdds
-                gameid={gameid}
-                onBetSelect={handleBetSelect}
-                matchOddsList={matchOddsList}
-                setitem={setitem}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** Bookmaker */}
-            {BookmakerList.length > 0 && (
-              <Bookmaker
-                gameid={gameid}
-                onBetSelect={handleBetSelect}
-                BookmakerList={BookmakerList}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** Tied Match */}
-            {tiedMatchList.length > 0 && (
-              <TiedMatch
-                gameid={gameid}
-                onBetSelect={handleBetSelect}
-                tiedMatchList={tiedMatchList}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** Normal */}
-            {NormalData.length > 0 && (
-              <Normal
-                onBetSelect={handleBetSelect}
-                NormalData={NormalData}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** Fancy1  */}
-            {fancy1Data.length > 0 && (
-              <Fancy1
-                onBetSelect={handleBetSelect}
-                fancy1Data={fancy1Data}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** */}
-            {khadoData.length > 0 && (
-              <Khado
-                onBetSelect={handleBetSelect}
-                khadoData={khadoData}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** OddEven */}
-            {oddEvenData.length > 0 && (
-              <OddEven
-                onBetSelect={handleBetSelect}
-                oddEvenData={oddEvenData}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )}
-
-            {/** New Tied Match */}
-            {/* {newtiedMatchList.length > 0 && (
-              <TiedMatch
-                onBetSelect={handleBetSelect}
-                tiedMatchList={newtiedMatchList}
-                pendingBetAmounts={pendingBetAmounts}
-                selectedBet={selectedBet}
-              />
-            )} */}
-          </div>
-        )}
-        {!showodds && (
+        {showOdds ? (
+          <HorseRacingMarkets
+            key={gameid}
+            bettingData={bettingData}
+            loading={isBettingLoading}
+            loaded={isBettingLoaded}
+            error={bettingDataError}
+            venue={venue}
+            time={time}
+            onBetSelect={setSelectedBet}
+          />
+        ) : (
           <div className='block lg:hidden'>
             <MatchedBet gameid={gameid} />
           </div>
         )}
-      </div>
-      <div className='sticky top-0 hidden h-fit lg:block'>
+      </main>
+
+      <aside className='sticky top-0 hidden h-fit lg:block'>
         <div className='w-[350px]'>
           <div className='mb-1'>
-            <div
-              className='bg-secondary text-secondary cursor-pointer p-1'
-              onClick={() => setshowlivetv((prev) => !prev)}
-            >
-              <span className='font-bold'>Live Match</span>
+            <div className='bg-secondary text-secondary flex items-center gap-2 p-1 font-bold'>
+              <FaTv aria-hidden='true' />
+              <span>Place Bet</span>
             </div>
-            {showlivetv && liveTvUrl && (
-              <div className='w-full'>
-                <iframe
-                  src={liveTvUrl}
-                  title='Watch Live'
-                  className='w-full'
-                  style={{ height: '50vh' }}
-                  allowFullScreen
-                  loading='lazy'
-                  allow='
-                    autoplay;
-                    encrypted-media;
-                    fullscreen;
-                    picture-in-picture;
-                    accelerometer;
-                    gyroscope
-                  '
-                />
-              </div>
-            )}
+            {renderPlaceBet()}
           </div>
-          <div className=''>
-            <PlaceBet
-              selectedBet={selectedBet}
-              onBetChange={handleBetChange}
-              onClose={() => setSelectedBet(null)}
-              team1={team1}
-              team2={team2}
-              item={item}
-              gameId={gameid}
-              eventName={match}
-              sid={10}
-              marketName={selectedBet?.marketName}
-              gameType={selectedBet?.gameType}
-              gameName='Horse Racing'
-              maxAmount={selectedBet?.maxAmount}
-              minAmount={selectedBet?.minAmount}
-            />
+          <div className='bg-secondary text-secondary p-1 font-bold'>
+            My Bet
           </div>
-          <div className='bg-secondary text-secondary p-1'>
-            <span className='font-bold'>My Bet</span>
-          </div>
-          <MatchedBet gameid={gameid} />
+          <MatchedBet gameid={gameid} pendingBetAmounts={pendingBetAmounts} />
         </div>
-      </div>
+      </aside>
 
-      {/* Mobile PlaceBet Modal */}
       {selectedBet && (
         <>
-          {/* Backdrop */}
           <div
             className='bg-opacity-50 fixed inset-0 z-40 block bg-black/60 lg:hidden'
             onClick={() => setSelectedBet(null)}
-          ></div>
-          {/* Modal */}
+          />
           <div className='fixed top-0 right-0 left-0 z-50 block max-h-screen overflow-y-auto bg-white shadow-lg lg:hidden'>
-            <PlaceBet
-              selectedBet={selectedBet}
-              onBetChange={handleBetChange}
-              onClose={() => setSelectedBet(null)}
-              isMobile={true}
-              team1={team1}
-              team2={team2}
-              gameId={gameid}
-              eventName={match}
-              sid={10}
-              marketName={selectedBet?.marketName}
-              gameType={selectedBet?.gameType}
-              gameName='Horse Racing'
-              maxAmount={selectedBet?.maxAmount}
-              minAmount={selectedBet?.minAmount}
-            />
+            {renderPlaceBet(true)}
           </div>
         </>
       )}

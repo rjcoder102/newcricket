@@ -62,7 +62,7 @@ export default function HorseRacing({ panel = false }) {
       <div className='min-h-0 flex-1 overflow-y-auto'>
         {races.map((race) => (
           <Link
-            to={`/hourse-racing-bet//${race.venue}/${race.gmid}`}
+            to={`/hourse-racing-bet/${encodeURIComponent(race.venue)}/${race.gmid}`}
             key={race.gmid}
             className='flex items-center gap-2 px-6 py-3 text-base hover:bg-gray-50'
           >

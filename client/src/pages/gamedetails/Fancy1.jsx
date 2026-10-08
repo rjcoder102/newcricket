@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { FaArrowRight } from 'react-icons/fa';
 
 function Fancy1({ onBetSelect, fancy1Data, pendingBetAmounts, selectedBet }) {
-  console.log('fancy1Data from fancy1', fancy1Data);
+  // console.log('fancy1Data from fancy1', fancy1Data);
 
   // Helper function to format max value (handle numbers and strings like "2L")
   const formatMax = (max) => {

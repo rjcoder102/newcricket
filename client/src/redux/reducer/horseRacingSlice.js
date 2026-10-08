@@ -54,6 +54,10 @@ const horseRacingSlice = createSlice({
     bettingData: [],
     loading: false,
     error: null,
+    bettingLoading: false,
+    bettingLoaded: false,
+    bettingError: null,
+    bettingGameId: null,
   },
   reducers: {},
   extraReducers: (builder) => {
@@ -70,18 +74,27 @@ const horseRacingSlice = createSlice({
         state.loading = false;
         state.error = action.payload || action.error.message;
       }) 
-      .addCase(fetchHorseRacingBettingData.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-        state.bettingData = [];
+      .addCase(fetchHorseRacingBettingData.pending, (state, action) => {
+        if (String(state.bettingGameId) !== String(action.meta.arg)) {
+          state.bettingData = [];
+          state.bettingLoaded = false;
+          state.bettingGameId = String(action.meta.arg);
+        }
+        state.bettingLoading = true;
+        state.bettingError = null;
       })
       .addCase(fetchHorseRacingBettingData.fulfilled, (state, action) => {
-        state.loading = false;
+        if (String(state.bettingGameId) !== String(action.meta.arg)) return;
+        state.bettingLoading = false;
+        state.bettingLoaded = true;
         state.bettingData = action.payload;
+        state.bettingError = null;
       })
       .addCase(fetchHorseRacingBettingData.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload || action.error.message;
+        if (String(state.bettingGameId) !== String(action.meta.arg)) return;
+        state.bettingLoading = false;
+        state.bettingLoaded = true;
+        state.bettingError = action.payload || action.error.message;
       });
   },
 });

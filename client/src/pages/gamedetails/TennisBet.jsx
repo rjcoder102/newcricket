@@ -290,7 +290,7 @@ function TennisBet() {
   const [showLive, setShowLive] = useState(false);
   const [showlivetv, setshowlivetv] = useState(false);
   const streamGmid = beventId || gameid;
-  const liveTvUrl = getLiveTvUrl(streamGmid);
+  const liveTvUrl = getLiveTvUrl(3, streamGmid);
   const scorecardUrl = getTennisScorecardUrl(streamGmid);
   // Extract team names from match title
   const matchTitle = 'Paarl Royals v Joburg Super Kings';

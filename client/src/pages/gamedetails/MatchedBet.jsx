@@ -61,9 +61,9 @@ function MatchedBet({ gameid }) {
       })
     );
   }, [dispatch, gameid]);
-  console.log('betHistory', betHistory);
+  // console.log('betHistory', betHistory);
   const filteredBetHistory = betHistory.filter((bet) => bet.gameId === gameid);
-  console.log('filteredBetHistory', filteredBetHistory);
+  // console.log('filteredBetHistory', filteredBetHistory);
 
   const getMatchedBetLabel = (item) => {
     if (!item) return 'N/A';

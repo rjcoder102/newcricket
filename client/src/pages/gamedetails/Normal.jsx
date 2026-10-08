@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { FaArrowRight } from 'react-icons/fa';
 
 function Normal({ onBetSelect, NormalData, pendingBetAmounts, selectedBet }) {
-  console.log('NormalData from normal', NormalData);
+  // console.log('NormalData from normal', NormalData);
 
   // Helper function to format odds (convert integer odds to decimal)
   const formatOdds = (odds) => {

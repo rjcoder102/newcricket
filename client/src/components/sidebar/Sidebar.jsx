@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { FaRegPlusSquare } from 'react-icons/fa';
 import { FaRegMinusSquare } from 'react-icons/fa';
@@ -19,7 +19,6 @@ function Sidebar({ isOpen, onClose }) {
   const { matches: soccerMatches } = useSelector((state) => state.soccer);
   const [showHorseRacing, setShowHorseRacing] = useState(false);
   const [activeTab, setActiveTab] = useState('');
-  const horseRacingPanelRef = useRef(null);
 
   useEffect(() => {
     dispatch(fetchCricketData());
@@ -31,20 +30,19 @@ function Sidebar({ isOpen, onClose }) {
   useEffect(() => {
     if (!showHorseRacing) return;
 
-    const closeOnOutsideClick = (event) => {
-      const target = event.target;
+    const closeOnClick = (event) => {
       if (
-        target instanceof Element &&
-        !horseRacingPanelRef.current?.contains(target) &&
-        !target.closest('[data-horse-racing-trigger]')
+        event.target instanceof Element &&
+        event.target.closest('[data-horse-racing-trigger]')
       ) {
-        setShowHorseRacing(false);
+        return;
       }
+
+      setShowHorseRacing(false);
     };
 
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    return () =>
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('click', closeOnClick);
+    return () => document.removeEventListener('click', closeOnClick);
   }, [showHorseRacing]);
 
   // Use Set to track expanded items by their unique IDs
@@ -257,7 +255,7 @@ function Sidebar({ isOpen, onClose }) {
                     className='block w-full border-b border-b-[#9e9e9e] p-1 pl-4 text-left text-sm font-[400] text-[#000000] transition-colors hover:opacity-70'
                     onClick={() => {
                       if (sport === 'Horse Racing') {
-                        setShowHorseRacing((isOpen) => !isOpen);
+                        setShowHorseRacing(true);
                       }
                     }}
                   >
@@ -346,10 +344,7 @@ function Sidebar({ isOpen, onClose }) {
         </div>
       </aside>
       {showHorseRacing && (
-        <div
-          ref={horseRacingPanelRef}
-          className='fixed top-12 left-20 z-[99999] lg:top-40 lg:left-55'
-        >
+        <div className='fixed top-12 left-20 z-[99999] lg:top-40 lg:left-55'>
           <HorseRacing panel />
         </div>
       )}

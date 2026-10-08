@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-// const isLocal = import.meta.env.VITE_IS_LOCAL === 'true';
+const isLocal = import.meta.env.VITE_IS_LOCAL === 'true';
 
-const isLocal = 'true';
+// const isLocal = 'true';
 
 const api = axios.create({
   baseURL: isLocal ? import.meta.env.VITE_LOCAL_API_URL : '/api',

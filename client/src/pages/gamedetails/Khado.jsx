@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { FaArrowRight } from 'react-icons/fa';
 
 function Khado({ onBetSelect, khadoData, pendingBetAmounts, selectedBet }) {
-  console.log('khadoData from khado', khadoData);
+  // console.log('khadoData from khado', khadoData);
 
   // Helper function to format max value (handle numbers and strings like "2L")
   const formatMax = (max) => {
