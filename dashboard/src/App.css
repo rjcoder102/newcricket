@@ -28,6 +28,15 @@ body {
 .bg-color2 {
   background: linear-gradient(#14805e 0%, #184438 100%);
 }
+.bg-topnav {
+  background: #0b8bd9;
+}
+.btn-pdf {
+  background: #d9232b;
+}
+.btn-excel {
+  background: #1d7a46;
+}
 
 .bg-blue {
   background: linear-gradient(

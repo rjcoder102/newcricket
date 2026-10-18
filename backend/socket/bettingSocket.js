@@ -13,8 +13,14 @@ import {
 import { getBestOddsForTeam } from '../controllers/cashoutController.js';
 import {
   fetchMatchData,
-  fetchCasinoData as fetchCasinoDataApi,
 } from '../services/matchApi/index.js';
+import { getCasinoTable } from '../services/casinoTableCache.js';
+import {
+  getLatestScore,
+  isValidScoreEventId,
+  requestScore,
+  startLiveScoreFeed,
+} from '../services/liveScoreFeed.js';
 
 dotenv.config();
 
@@ -43,14 +49,6 @@ let recentResultsCache = new Map();
 
 // Store score socket connection per match
 let liveScoreSockets = {};
-
-//Caching the balance ,exposure and open bets
-
-const lastSentValues = {
-  balance: new Map(),
-  exposure: new Map(),
-  openBets: new Map(),
-};
 
 // helper: subscribe to the Live score
 const subscribeToLiveScore = (gameid, apitype) => {
@@ -258,62 +256,70 @@ const pollBettingData = async () => {
 };
 
 // Poll casino betting data - IMMEDIATE (no delays)
+let casinoPollRunning = false;
 const pollCasinoBettingData = async () => {
-  const groupedByGameId = getUniqueSubscriptions();
+  // A slow provider must not let ticks pile up on top of each other
+  if (casinoPollRunning) return;
+  casinoPollRunning = true;
 
-  for (const { gameid, apitype } of groupedByGameId) {
-    try {
-      // Only poll betting data for casino games
-      if (apitype === 'casino') {
-        const newBettingData = await fetchCasinoDataApi(gameid);
+  try {
+    const casinoGames = [
+      ...new Set(
+        getUniqueSubscriptions()
+          .filter((s) => s.apitype === 'casino')
+          .map((s) => s.gameid)
+      ),
+    ];
 
-        if (newBettingData.success && newBettingData.data) {
-          const newRoundId = newBettingData.data.mid;
-          const cacheKey = `betting_${gameid}_${apitype}`;
+    // Tables are fetched in parallel; the shared cache means a table that was just
+    // read for bet validation is not fetched again.
+    const updates = await Promise.all(
+      casinoGames.map(async (gameid) => {
+        try {
+          const newBettingData = await getCasinoTable(gameid, 900);
+          if (!newBettingData?.success || !newBettingData.data) return null;
 
+          const cacheKey = `betting_${gameid}_casino`;
           // Simple check: only send if data changed
-          const currentCached = cachedData[cacheKey];
           if (
-            JSON.stringify(currentCached) !== JSON.stringify(newBettingData)
+            JSON.stringify(cachedData[cacheKey]) ===
+            JSON.stringify(newBettingData)
           ) {
-            console.log(
-              ` [${new Date().toISOString()}] Data changed for ${gameid}`
-            );
-
-            // IMMEDIATE: Update cache and send betting data right away
-            cachedData[cacheKey] = newBettingData;
-
-            // Send casino_update
-            clients.forEach((client) => {
-              if (
-                client.gameid === gameid &&
-                client.apitype === apitype &&
-                client.ws.readyState === 1
-              ) {
-                client.ws.send(
-                  JSON.stringify({
-                    type: 'casino_update',
-                    gameid,
-                    apitype,
-                    data: newBettingData.data,
-                  })
-                );
-              }
-            });
-
-            //  REMOVED: casino_result_update WebSocket messages
-            // Frontend now uses API calls (fetchCasinoResultData) when round changes
-            // This is triggered by useRef detection in WebSocket handler
-            // Benefits: Reduced bandwidth, no duplicate messages, cleaner logs
+            return null;
           }
+
+          cachedData[cacheKey] = newBettingData;
+
+          // Serialised once and reused for every viewer of this table
+          return [
+            gameid,
+            JSON.stringify({
+              type: 'casino_update',
+              gameid,
+              apitype: 'casino',
+              data: newBettingData.data,
+            }),
+          ];
+        } catch (error) {
+          console.error(
+            `Casino betting data polling error for ${gameid}:`,
+            error.message
+          );
+          return null;
         }
-      }
-    } catch (error) {
-      console.error(
-        `Casino betting data polling error for ${gameid} (${apitype}):`,
-        error.message
-      );
+      })
+    );
+
+    const changed = new Map(updates.filter(Boolean));
+    if (changed.size === 0) return;
+
+    for (const client of clients) {
+      if (client.apitype !== 'casino' || client.ws.readyState !== 1) continue;
+      const message = changed.get(client.gameid);
+      if (message) client.ws.send(message);
     }
+  } finally {
+    casinoPollRunning = false;
   }
 };
 
@@ -324,8 +330,6 @@ export const setupWebSocket = (server) => {
 
   // Every time someone connects we:
   wss.on('connection', (ws) => {
-    console.log('WebSocket client connected');
-
     //  Create client object with roundId and userId
     let client = {
       ws,
@@ -334,6 +338,7 @@ export const setupWebSocket = (server) => {
       roundId: null,
       userId: null,
       userName: null,
+      scoreEventId: null,
     };
     clients.push(client);
 
@@ -346,29 +351,53 @@ export const setupWebSocket = (server) => {
         // Register userId for account-level updates (balance, exposure, open bets, cashout)
         if (data.type === 'register' && data.userId) {
           client.userId = data.userId;
-          console.log(`[WS] Registered userId: ${data.userId}`);
+          indexClientUser(client, client.userId);
         }
 
         if (data.type === 'subscribe' && data.gameid) {
           client.gameid = data.gameid;
           client.apitype = data.apitype || 'cricket';
           client.roundId = data.roundId || null;
-          client.userId = data.userId || null;
+          // Keep an earlier registration if this subscribe carries no userId
+          client.userId = data.userId || client.userId || null;
+          indexClientUser(client, client.userId);
 
-          //  ESSENTIAL: Clear only betting/results cache, keep deduplication cache
+          // A new subscriber gets the latest table right away from the shared cache;
+          // clearing it instead would make the poller re-broadcast to every viewer.
           if (client.apitype === 'casino') {
-            const bettingCacheKey = `betting_${client.gameid}_casino`;
-            const resultsCacheKey = `results_${client.gameid}_casino`;
-            delete cachedData[bettingCacheKey];
-            delete cachedData[resultsCacheKey];
-            //  DON'T clear deduplication cache keys (message_*, results_*)
-            console.log(
-              `[CACHE] Cleared betting/results cache for ${client.gameid} (kept deduplication cache)`
-            );
+            const latest = cachedData[`betting_${client.gameid}_casino`];
+            if (latest?.data && ws.readyState === 1) {
+              ws.send(
+                JSON.stringify({
+                  type: 'casino_update',
+                  gameid: client.gameid,
+                  apitype: 'casino',
+                  data: latest.data,
+                })
+              );
+            }
           }
 
           //  FIX: Subscribe to live score socket for this game
           subscribeToLiveScore(client.gameid, client.apitype);
+
+          // Live scorecard: viewers share one provider feed per event
+          if (isValidScoreEventId(data.scoreEventId)) {
+            client.scoreEventId = data.scoreEventId;
+            const cached = getLatestScore(client.scoreEventId);
+            if (cached && ws.readyState === 1) {
+              ws.send(
+                JSON.stringify({
+                  type: 'scoreData',
+                  scoreEventId: client.scoreEventId,
+                  data: cached.data,
+                })
+              );
+            }
+            requestScore(client.scoreEventId);
+          } else {
+            client.scoreEventId = null;
+          }
         }
       } catch (err) {
         console.error(' [WS] Invalid message:', err.message);
@@ -377,94 +406,103 @@ export const setupWebSocket = (server) => {
 
     // Remove the disconnected client from the clients array
     ws.on('close', () => {
+      indexClientUser(client, null);
       clients = clients.filter((c) => c.ws !== ws);
-      console.log(' WebSocket client disconnected');
     });
   });
 
   // Start all polling intervals
   setInterval(pollBettingData, 1000);
   setInterval(pollCasinoBettingData, 1000);
+
+  // Live scorecards: one shared provider feed, refreshed every 5s per active event
+  startLiveScoreFeed({
+    activeEventIds: () => [
+      ...new Set(clients.map((c) => c.scoreEventId).filter(Boolean)),
+    ],
+    onUpdate: (eventId, data) => {
+      const message = JSON.stringify({
+        type: 'scoreData',
+        scoreEventId: eventId,
+        data,
+      });
+      clients.forEach((client) => {
+        if (client.scoreEventId === eventId && client.ws.readyState === 1) {
+          client.ws.send(message);
+        }
+      });
+    },
+  });
 };
 
 //  REMOVED: sendCasinoResultUpdate function
 // Frontend now uses API calls (fetchCasinoResultData) triggered by useRef round detection
 // This function is no longer needed and has been replaced with the optimized approach
 
-//FUNCTION THAT SENDS BALANCE UPDATES TO ALL THE CONNECTED CLIENTS
+// userId -> Set of that user's sockets. Account updates (balance/exposure/open bets)
+// go straight to the owner instead of scanning or broadcasting to every connection.
+const clientsByUser = new Map();
+
+const indexClientUser = (client, userId) => {
+  const next = userId ? String(userId) : null;
+  if (client.userKey === next) return;
+
+  if (client.userKey) {
+    const previous = clientsByUser.get(client.userKey);
+    previous?.delete(client);
+    if (previous && previous.size === 0) clientsByUser.delete(client.userKey);
+  }
+
+  client.userKey = next;
+  if (next) {
+    let sockets = clientsByUser.get(next);
+    if (!sockets) {
+      sockets = new Set();
+      clientsByUser.set(next, sockets);
+    }
+    sockets.add(client);
+  }
+};
+
+const sendToUserSockets = (userId, payload) => {
+  const sockets = clientsByUser.get(String(userId?._id ?? userId));
+  if (!sockets) return 0;
+
+  const message = JSON.stringify(payload);
+  let sentCount = 0;
+  for (const client of sockets) {
+    if (client.ws.readyState === 1) {
+      client.ws.send(message);
+      sentCount++;
+    }
+  }
+  return sentCount;
+};
+
+//FUNCTION THAT SENDS BALANCE UPDATES TO THE USER'S CONNECTED CLIENTS
 export const sendBalanceUpdates = (userId, newBalance) => {
-  //Check if the value is changed
-  const lastBalance = lastSentValues.balance.get(userId);
-
-  if (lastBalance === newBalance) {
-    console.log('Skipped-No Change');
-    return;
-  }
-
-  let sentCount = 0;
-
-  //Send only if the Value is Changed
-  clients.forEach((client) => {
-    if (client.ws.readyState === 1) {
-      client.ws.send(
-        JSON.stringify({
-          type: 'balance_update',
-          userId: userId,
-          newBalance: newBalance,
-        })
-      );
-      sentCount++;
-      console.log(` [WEBSOCKET] Sent to client ${sentCount}`);
-    }
+  sendToUserSockets(userId, {
+    type: 'balance_update',
+    userId,
+    newBalance,
   });
-
-  //Update Cache
-  lastSentValues.balance.set(userId, newBalance);
-
-  console.log(` [WEBSOCKET] Sent to ${sentCount} clients`);
 };
 
-//FUNCTIONS THAT SEND EXPOSURE UPDATES TO ALL THE CONNECTED CLIENTS
+//FUNCTION THAT SENDS EXPOSURE UPDATES TO THE USER'S CONNECTED CLIENTS
 export const sendExposureUpdates = (userId, newExposure) => {
-  const lastExposure = lastSentValues.exposure.get(userId);
-  if (lastExposure === newExposure) {
-    return;
-  }
-
-  let sentCount = 0;
-
-  //Send only if the Value is Changed
-  clients.forEach((client) => {
-    if (client.ws.readyState === 1) {
-      client.ws.send(
-        JSON.stringify({
-          type: 'exposure_update',
-          userId: userId,
-          newExposure: newExposure,
-        })
-      );
-      sentCount++;
-    }
+  sendToUserSockets(userId, {
+    type: 'exposure_update',
+    userId,
+    newExposure,
   });
-
-  //Update Cache
-  lastSentValues.exposure.set(userId, newExposure);
 };
 
-//FUNCTION THAT UPDATES OPEN BETS TO ALL THE CONNECTED CLIENTS AFTER BET SETTLEMENT
+//FUNCTION THAT UPDATES OPEN BETS TO THE USER'S CONNECTED CLIENTS AFTER BET SETTLEMENT
 export const sendOpenBetsUpdates = (userId, newOpenBets) => {
-  let sentCount = 0;
-  clients.forEach((client) => {
-    if (client.userId === userId && client.ws.readyState === 1) {
-      client.ws.send(
-        JSON.stringify({
-          type: 'open_bets_update',
-          userId: userId,
-          newOpenBets: newOpenBets,
-        })
-      );
-      sentCount++;
-    }
+  sendToUserSockets(userId, {
+    type: 'open_bets_update',
+    userId: userId?._id ?? userId,
+    newOpenBets,
   });
 };
 

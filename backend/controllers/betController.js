@@ -75,7 +75,8 @@ async function validateSportsMarket(
   otype,
   sid,
   oname,
-  gameType
+  gameType,
+  tno
 ) {
   return _validateSportsMarket(cachedData, {
     gameId,
@@ -87,6 +88,7 @@ async function validateSportsMarket(
     sid,
     oname,
     gameType,
+    tno,
   });
 }
 
@@ -121,6 +123,99 @@ async function validateCasinoMarket(gameId, teamName, xValue, otype) {
 //  DOUBLE SETTLEMENT FIX: Processing lock to prevent concurrent executions
 let isProcessingCasinoBets = false;
 const roundTo2 = (value) => Number(Number(value || 0).toFixed(2));
+
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+    ),
+  ]);
+
+// The match list is only used to resolve beventId, so a short-lived cache
+// avoids a slow external round trip on every first bet in a market.
+const MATCH_LIST_TTL_MS = 30000;
+const matchListCache = new Map();
+const getMatchListCached = (sid) => {
+  const key = Number(sid);
+  const hit = matchListCache.get(key);
+  if (hit && Date.now() - hit.at < MATCH_LIST_TTL_MS) return hit.promise;
+
+  const promise = withTimeout(apiFetchMatchList(key), 5000, 'match list');
+  matchListCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => {
+    if (matchListCache.get(key)?.promise === promise) {
+      matchListCache.delete(key);
+    }
+  });
+  return promise;
+};
+
+const lookupBeventId = async (sid, gameId, logTag) => {
+  try {
+    const matchListData = await getMatchListCached(sid);
+    if (matchListData?.success && matchListData.data) {
+      const allMatches = [
+        ...(matchListData.data.t1 || []),
+        ...(matchListData.data.t2 || []),
+      ];
+      const matched = allMatches.find((m) => {
+        const matchId = String(m.beventId || m.oldgmid || m.gmid);
+        return matchId === String(gameId);
+      });
+      return matched?.beventId ? String(matched.beventId) : '';
+    }
+  } catch (err) {
+    console.warn(
+      `[${logTag}] Failed to fetch match list for beventId lookup:`,
+      err.message
+    );
+  }
+  return '';
+};
+
+// Upline totals are not part of the bet response, so they are refreshed in the
+// background. Users who bet are collected and their uplines are recalculated together,
+// once per flush: 100k bets in a few seconds cost a handful of recalculations, not
+// 100k. The delay between flushes grows with how long the last one took, so the
+// recalculation can never occupy the database for more than about half the time.
+const UPLINE_MIN_FLUSH_MS = 3000;
+const pendingUplineUsers = new Set();
+let uplineFlushTimer = null;
+let uplineFlushRunning = false;
+let lastUplineFlushMs = 0;
+
+const flushUplineUpdates = async () => {
+  uplineFlushTimer = null;
+  if (uplineFlushRunning || pendingUplineUsers.size === 0) return;
+
+  uplineFlushRunning = true;
+  const userIds = [...pendingUplineUsers];
+  pendingUplineUsers.clear();
+  const startedAt = Date.now();
+  try {
+    await updateAllUplines(userIds);
+  } catch (err) {
+    console.error(' [BET] Error updating upline balances:', err.message);
+  } finally {
+    lastUplineFlushMs = Date.now() - startedAt;
+    uplineFlushRunning = false;
+    if (pendingUplineUsers.size > 0) armUplineFlush();
+  }
+};
+
+const armUplineFlush = () => {
+  if (uplineFlushTimer || uplineFlushRunning) return;
+  uplineFlushTimer = setTimeout(
+    flushUplineUpdates,
+    Math.max(UPLINE_MIN_FLUSH_MS, lastUplineFlushMs * 2)
+  );
+};
+
+const scheduleUplineUpdate = (userId) => {
+  pendingUplineUsers.add(String(userId));
+  armUplineFlush();
+};
 
 export const placeBetUnified = async (req, res) => {
   try {
@@ -806,6 +901,7 @@ const placeBet = async (req, res) => {
       teamName,
       otype,
       oname,
+      tno,
     } = req.body;
 
     // Validate required fields
@@ -813,18 +909,25 @@ const placeBet = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    // Server-side market validation: check suspend status + odds against live data
-    const marketCheck = await validateSportsMarket(
-      gameId,
-      gameName,
-      marketName,
-      teamName,
-      xValue,
-      otype,
-      sid,
-      oname,
-      gameType
-    );
+    // Independent reads run together: live-odds validation (external API),
+    // user lookup and the existing-market lookup.
+    const uniqueKey = { gameId, eventName, marketName };
+    const [marketCheck, user, existingExact] = await Promise.all([
+      validateSportsMarket(
+        gameId,
+        gameName,
+        marketName,
+        teamName,
+        xValue,
+        otype,
+        sid,
+        oname,
+        gameType,
+        tno
+      ),
+      SubAdmin.findById(id),
+      betModel.findOne(uniqueKey),
+    ]);
     if (!marketCheck.valid) {
       console.warn(
         `[BET REJECTED] Sports: gameId=${gameId} team=${teamName} market=${marketName} reason="${marketCheck.reason}"`
@@ -832,7 +935,6 @@ const placeBet = async (req, res) => {
       return res.status(400).json({ message: marketCheck.reason });
     }
 
-    const user = await SubAdmin.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -855,43 +957,19 @@ const placeBet = async (req, res) => {
 
     const marketMeta = marketCheck.marketMeta || {};
 
-    // 1. Check uniqueness: existing bet with same gameId, eventName, marketName, userId, and status 0
-    const uniqueKey = { gameId, eventName, marketName };
-    const existingExact = await betModel.findOne(uniqueKey);
-
     let market_id;
 
     if (existingExact) {
       market_id = existingExact.market_id;
     }
 
-    // Only call the external API if there's no existing bet
+    // Market registration with the external API is not needed to accept the
+    // bet (failures were already only logged), so it runs in the background.
     if (!existingExact) {
       market_id = Math.floor(10000000 + Math.random() * 90000000);
 
-      //Here we are using the external Api
-      try {
-        // Look up beventId from match list (shared by fancy and sports payloads)
-        let beventId = '';
-        try {
-          const matchListData = await apiFetchMatchList(Number(sid));
-          if (matchListData?.success && matchListData.data) {
-            const allMatches = [
-              ...(matchListData.data.t1 || []),
-              ...(matchListData.data.t2 || []),
-            ];
-            const matched = allMatches.find((m) => {
-              const matchId = String(m.beventId || m.oldgmid || m.gmid);
-              return matchId === String(gameId);
-            });
-            beventId = matched?.beventId ? String(matched.beventId) : '';
-          }
-        } catch (err) {
-          console.warn(
-            `[BET] Failed to fetch match list for beventId lookup:`,
-            err.message
-          );
-        }
+      const registerMarket = async () => {
+        const beventId = await lookupBeventId(sid, gameId, 'BET');
 
         if (gameType === 'fancy1' || gameType === 'oddeven') {
           // fancy1 and oddeven use the same request format as fancy (session) bets:
@@ -924,12 +1002,14 @@ const placeBet = async (req, res) => {
             runners: marketMeta.runners || [],
           });
         }
-      } catch (apiErr) {
+      };
+
+      registerMarket().catch((apiErr) => {
         console.error(
           `[SPORTS BET] bet-incoming API failed for gameId=${gameId}:`,
           apiErr.message
         );
-      }
+      });
     }
 
     let p = parseFloat(price);
@@ -986,7 +1066,11 @@ const placeBet = async (req, res) => {
       status: 0,
       isCashedOut: { $ne: true },
     };
-    if (gameType === 'fancy1' || gameType === 'oddeven') {
+    if (
+      gameType === 'fancy1' ||
+      gameType === 'oddeven' ||
+      PER_TEAM_MARKET_TYPES.includes(gameType)
+    ) {
       marketScopedQuery.marketName = marketName;
     }
 
@@ -994,9 +1078,11 @@ const placeBet = async (req, res) => {
       gameType === 'oddeven' || PER_TEAM_MARKET_TYPES.includes(gameType)
         ? { ...marketScopedQuery, teamName }
         : marketScopedQuery;
-    const existingBet = await betModel.findOne(existingBetQuery);
-    const marketBets = await betModel.find(marketScopedQuery);
-
+    const [existingBet, marketBets, pendingBets] = await Promise.all([
+      betModel.findOne(existingBetQuery),
+      betModel.find(marketScopedQuery),
+      betModel.find({ userId: id, status: 0 }),
+    ]);
     const validation = validateBetWithNewBetOffset(
       user.avbalance,
       user.balance,
@@ -1026,10 +1112,6 @@ const placeBet = async (req, res) => {
     }
 
     // STEP 4: Check exposure limit using scenario-based simulation
-    const pendingBets = await betModel.find({
-      userId: id,
-      status: 0,
-    });
     const simulatedNewBet = {
       gameType,
       gameId,
@@ -1263,28 +1345,6 @@ const placeBet = async (req, res) => {
       throw new Error('Critical: PTI calculation error - bet rejected');
     }
 
-    await user.save();
-
-    // Send WebSocket updates for balance, exposure and open bets
-
-    console.time('SPORTS_BET_WEBSCOKET_UPDATES');
-    sendBalanceUpdates(user._id, user.avbalance);
-    sendExposureUpdates(user._id, user.exposure);
-    sendOpenBetsUpdates(user._id, null);
-    console.timeEnd('SPORTS_BET_WEBSOCKET_UPDATES');
-
-    // Update all upline balances after bet placement
-    try {
-      console.time('SPORTS_BET_UPLINE_UPDATE');
-      await updateAllUplines(user._id);
-      console.timeEnd('SPORTS_BET_UPLINE_UPDATE');
-    } catch (err) {
-      console.error(
-        ` [SPORTS BET] Error updating upline balances:`,
-        err.message
-      );
-    }
-
     // Record bet history regardless of new/existing
     const betHistory = new betHistoryModel({
       betId: (newBet ? newBet._id : existingBet._id).toString(), // Link to parent bet for settlement
@@ -1308,7 +1368,14 @@ const placeBet = async (req, res) => {
       userBalanceBefore: user.balance,
       userExposureBefore: user.exposure,
     });
-    await betHistory.save();
+
+    await Promise.all([user.save(), betHistory.save()]);
+
+    sendBalanceUpdates(user._id, user.avbalance);
+    sendExposureUpdates(user._id, user.exposure);
+    sendOpenBetsUpdates(user._id, null);
+
+    scheduleUplineUpdate(user._id);
 
     return res.status(201).json({ message: 'Bet placed successfully' });
   } catch (error) {
@@ -1346,18 +1413,22 @@ export const placeFancyBet = async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const fancyCheck = await validateFancyMarket(
-      gameId,
-      gameName,
-      marketName,
-      teamName,
-      xValue,
-      otype,
-      sid,
-      fancyScore,
-      oname,
-      gameType
-    );
+    const uniqueKey = { gameId, eventName, marketName };
+    const [fancyCheck, user, existingExact] = await Promise.all([
+      validateFancyMarket(
+        gameId,
+        gameName,
+        marketName,
+        teamName,
+        xValue,
+        otype,
+        sid,
+        fancyScore,
+        oname
+      ),
+      SubAdmin.findById(id),
+      betModel.findOne(uniqueKey),
+    ]);
     if (!fancyCheck.valid) {
       console.warn(
         `[BET REJECTED] Fancy: gameId=${gameId} team=${teamName} market=${marketName} reason="${fancyCheck.reason}"`
@@ -1365,7 +1436,6 @@ export const placeFancyBet = async (req, res) => {
       return res.status(400).json({ message: fancyCheck.reason });
     }
 
-    const user = await SubAdmin.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -1386,9 +1456,6 @@ export const placeFancyBet = async (req, res) => {
       return res.status(200).json({ message: 'created successfully' });
     }
 
-    const uniqueKey = { gameId, eventName, marketName };
-    const existingExact = await betModel.findOne(uniqueKey);
-
     const fancyMeta = fancyCheck.marketMeta || {};
     let market_id;
 
@@ -1399,27 +1466,7 @@ export const placeFancyBet = async (req, res) => {
     if (!existingExact) {
       market_id = Math.floor(10000000 + Math.random() * 90000000);
 
-      // Look up beventId from the match list
-      let beventId = '';
-      try {
-        const matchListData = await apiFetchMatchList(Number(sid));
-        if (matchListData?.success && matchListData.data) {
-          const allMatches = [
-            ...(matchListData.data.t1 || []),
-            ...(matchListData.data.t2 || []),
-          ];
-          const matched = allMatches.find((m) => {
-            const matchId = String(m.beventId || m.oldgmid || m.gmid);
-            return matchId === String(gameId);
-          });
-          beventId = matched?.beventId ? String(matched.beventId) : '';
-        }
-      } catch (err) {
-        console.warn(
-          `[FANCY BET] Failed to fetch match list for beventId lookup:`,
-          err.message
-        );
-      }
+      const beventId = await lookupBeventId(sid, gameId, 'FANCY BET');
 
       try {
         // market_id is included for Provider A; Provider B ignores it on the
@@ -1465,14 +1512,38 @@ export const placeFancyBet = async (req, res) => {
     betAmount = parseFloat(betAmount.toFixed(2));
     p = parseFloat(p.toFixed(2));
 
-    const fancyMarketBets = await betModel.find({
-      userId: id,
-      gameId,
-      teamName,
-      gameType,
-      status: 0,
-      isCashedOut: { $ne: true },
-    });
+    const [fancyMarketBets, pendingBets, mergeBet, oppositeBet] =
+      await Promise.all([
+        betModel.find({
+          userId: id,
+          gameId,
+          teamName,
+          gameType,
+          status: 0,
+          isCashedOut: { $ne: true },
+        }),
+        betModel.find({ userId: id, status: 0 }),
+        betModel.findOne({
+          userId: id,
+          gameId,
+          gameType,
+          teamName,
+          otype,
+          fancyScore,
+          status: 0,
+          isCashedOut: { $ne: true },
+        }),
+        betModel.findOne({
+          userId: id,
+          gameId,
+          gameType,
+          teamName,
+          otype: otype === 'back' ? 'lay' : 'back',
+          status: 0,
+          isCashedOut: { $ne: true },
+        }),
+      ]);
+    const existingBet = mergeBet ? null : oppositeBet;
 
     const fancyValidation = validateFancyBetBalance(
       user.avbalance,
@@ -1495,10 +1566,6 @@ export const placeFancyBet = async (req, res) => {
       });
     }
 
-    const pendingBets = await betModel.find({
-      userId: id,
-      status: 0,
-    });
     const simulatedNewBet = {
       gameType,
       gameId,
@@ -1516,29 +1583,6 @@ export const placeFancyBet = async (req, res) => {
     if (projectedExposure > user.exposureLimit) {
       return res.status(400).json({ message: 'Exposure limit exceeded' });
     }
-
-    const mergeBet = await betModel.findOne({
-      userId: id,
-      gameId,
-      gameType,
-      teamName,
-      otype,
-      fancyScore,
-      status: 0,
-      isCashedOut: { $ne: true },
-    });
-
-    const existingBet = mergeBet
-      ? null
-      : await betModel.findOne({
-          userId: id,
-          gameId,
-          gameType,
-          teamName,
-          otype: otype === 'back' ? 'lay' : 'back',
-          status: 0,
-          isCashedOut: { $ne: true },
-        });
 
     let activeBetId = null;
     let placementType = 'new';
@@ -1774,13 +1818,11 @@ export const placeFancyBet = async (req, res) => {
       userExposureBefore: user.exposure,
     });
 
-    await betHistory.save();
-
     // Recalculate exposure from updated bets (fancy + non-fancy)
-    const updatedPendingBets = await betModel.find({
-      userId: id,
-      status: 0,
-    });
+    const [, updatedPendingBets] = await Promise.all([
+      betHistory.save(),
+      betModel.find({ userId: id, status: 0 }),
+    ]);
     user.exposure = calculateAllExposure(updatedPendingBets);
     user.avbalance = user.balance - user.exposure;
 
@@ -1795,16 +1837,7 @@ export const placeFancyBet = async (req, res) => {
       `[FANCY EXPOSURE] User ${user.userName}: exposure=${user.exposure}`
     );
 
-    // Update all upline balances after bet placement
-    try {
-      await updateAllUplines(user._id);
-    } catch (err) {
-      console.error(
-        ' [FANCY BET] Error updating upline balances:',
-        err.message
-      );
-    }
-
+    scheduleUplineUpdate(user._id);
     // Send updates to all connected clients
     sendOpenBetsUpdates(user);
     sendBalanceUpdates(user._id, user.avbalance);

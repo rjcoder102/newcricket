@@ -30,6 +30,9 @@ const countUplines = async (user) => {
   return count;
 };
 
+// Downline users are read in batches of this size when totals are recalculated
+const USER_BATCH_SIZE = 5000;
+
 const updateAdmin = async (id) => {
   try {
     const admin = await SubAdmin.findById(id);
@@ -40,82 +43,100 @@ const updateAdmin = async (id) => {
     // Include ALL downlines (including deleted) for financial calculations.
     // Deleted users should still count in hierarchy calculations to prevent
     // sub-admins from hiding losses by deleting users.
+    // Lean + projection: only the fields below are needed, and an admin can have
+    // tens of thousands of downlines.
     const directDownlines = await SubAdmin.find({
       invite: admin.code,
-    });
+    })
+      .select(
+        'role baseBalance totalExposure exposure bettingProfitLoss'
+      )
+      .lean();
 
     //  CLEAN SEPARATION: Calculate each type separately
     let DownlineTotalExposure = 0;
     let DownlineTotalBettingProfitLoss = 0;
+    // baseBalance is rounded to 2 decimals when read through the model getter
     const DownlineTotalBaseBalance = directDownlines.reduce(
-      (sum, user) => sum + (user.baseBalance || 0),
+      (sum, user) =>
+        sum + (parseFloat(Number(user.baseBalance || 0).toFixed(2)) || 0),
       0
     );
 
-    // Calculate correct exposure and bettingProfitLoss for each downline
+    // FIX: If downline is NOT a 'user' role (i.e., it's an agent/admin),
+    // use their stored totalExposure which was already calculated recursively.
+    // Only calculate from bets for actual end-users who place bets.
+    const endUsers = [];
     for (const user of directDownlines) {
+      if (user.role !== 'user') {
+        DownlineTotalExposure += user.totalExposure || user.exposure || 0;
+        DownlineTotalBettingProfitLoss += user.bettingProfitLoss || 0;
+      } else {
+        endUsers.push(user);
+      }
+    }
+
+    // For end users, bettingProfitLoss comes from betHistoryModel (single source of
+    // truth - stores each individual bet with original values) and exposure from the
+    // pending bets. Both are read for a whole batch of users in one query each
+    // instead of two queries per user.
+    const driftFixes = [];
+    for (let i = 0; i < endUsers.length; i += USER_BATCH_SIZE) {
+      const batch = endUsers.slice(i, i + USER_BATCH_SIZE);
+      const batchIds = batch.map((user) => user._id.toString());
+
       try {
-        // FIX: If downline is NOT a 'user' role (i.e., it's an agent/admin),
-        // use their stored totalExposure which was already calculated recursively.
-        // Only calculate from bets for actual end-users who place bets.
-        if (user.role !== 'user') {
-          DownlineTotalExposure += user.totalExposure || user.exposure || 0;
-          DownlineTotalBettingProfitLoss += user.bettingProfitLoss || 0;
-          console.log(
-            `[UPDATE ADMIN] Agent/Admin ${user.userName}: using stored totalExposure=${user.totalExposure || user.exposure || 0}`
-          );
-          continue;
-        }
-
-        // For actual users, recalculate bettingProfitLoss from betHistoryModel
-        // (single source of truth - stores each individual bet with original values)
-        const plResult = await betHistoryModel.aggregate([
-          {
-            $match: {
-              userId: user._id.toString(),
-              status: { $in: [1, 2] },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              totalPL: { $sum: '$profitLossChange' },
-            },
-          },
+        const [plRows, pendingBets] = await Promise.all([
+          betHistoryModel.aggregate([
+            { $match: { userId: { $in: batchIds }, status: { $in: [1, 2] } } },
+            { $group: { _id: '$userId', totalPL: { $sum: '$profitLossChange' } } },
+          ]),
+          betModel.find({ userId: { $in: batchIds }, status: 0 }).lean(),
         ]);
-        const userBettingPL = plResult.length > 0 ? plResult[0].totalPL : 0;
 
-        // Update user's stored bettingProfitLoss if it drifted from betHistoryModel
-        if (user.bettingProfitLoss !== userBettingPL) {
-          console.log(
-            `[UPDATE ADMIN] User ${user.userName}: correcting bettingProfitLoss from ${user.bettingProfitLoss} to ${userBettingPL}`
-          );
-          user.bettingProfitLoss = userBettingPL;
-          await user.save();
+        const plByUser = new Map(plRows.map((row) => [row._id, row.totalPL]));
+        const pendingByUser = new Map();
+        for (const bet of pendingBets) {
+          const key = String(bet.userId);
+          if (!pendingByUser.has(key)) pendingByUser.set(key, []);
+          pendingByUser.get(key).push(bet);
         }
-        DownlineTotalBettingProfitLoss += userBettingPL;
 
-        // For actual users, get all pending bets
-        const updatedPendingBets = await betModel.find({
-          userId: user._id,
-          status: 0,
-        });
+        for (const user of batch) {
+          const key = user._id.toString();
+          const userBettingPL = plByUser.get(key) ?? 0;
 
-        // Market-based exposure calculation (handles fancy + non-fancy + offsetting)
-        const userExposure = calculateAllExposure(updatedPendingBets);
-        DownlineTotalExposure += userExposure;
-        console.log(
-          `[UPDATE ADMIN] User ${user.userName}: exposure=${userExposure} bettingPL=${userBettingPL}`
-        );
+          // Update user's stored bettingProfitLoss if it drifted from betHistoryModel
+          if ((user.bettingProfitLoss ?? 0) !== userBettingPL) {
+            driftFixes.push({
+              updateOne: {
+                filter: { _id: user._id },
+                update: { $set: { bettingProfitLoss: userBettingPL } },
+              },
+            });
+          }
+          DownlineTotalBettingProfitLoss += userBettingPL;
+
+          // Market-based exposure calculation (handles fancy + non-fancy + offsetting)
+          DownlineTotalExposure += calculateAllExposure(
+            pendingByUser.get(key) || []
+          );
+        }
       } catch (error) {
         console.error(
-          `[UPDATE ADMIN] Error calculating exposure for user ${user.userName}:`,
+          `[UPDATE ADMIN] Error calculating exposure for a user batch:`,
           error.message
         );
-        // Fallback to user's stored values
-        DownlineTotalExposure += user.exposure || 0;
-        DownlineTotalBettingProfitLoss += user.bettingProfitLoss || 0;
+        // Fallback to the users' stored values
+        for (const user of batch) {
+          DownlineTotalExposure += user.exposure || 0;
+          DownlineTotalBettingProfitLoss += user.bettingProfitLoss || 0;
+        }
       }
+    }
+
+    if (driftFixes.length > 0) {
+      await SubAdmin.bulkWrite(driftFixes, { ordered: false });
     }
 
     // CLEAN SEPARATION: Update admin with separate fields
@@ -145,41 +166,57 @@ const updateAdmin = async (id) => {
 
 export const updateAllUplines = async (userIdOrArray) => {
   try {
-    const userIds = Array.isArray(userIdOrArray)
-      ? userIdOrArray
-      : [userIdOrArray];
+    const userIds = [
+      ...new Set(
+        (Array.isArray(userIdOrArray) ? userIdOrArray : [userIdOrArray])
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+    if (userIds.length === 0) return;
 
-    for (const userId of userIds) {
-      let currentUser = await SubAdmin.findById(userId);
-      if (!currentUser) {
-        console.log(` [UPDATE UPLINES] User not found: ${userId}`);
-        continue;
+    const startUsers = await SubAdmin.find({ _id: { $in: userIds } })
+      .select('invite')
+      .lean();
+
+    // Each upline is looked up once however many users share it
+    const uplineByCode = new Map();
+    const findUpline = (code) => {
+      if (!uplineByCode.has(code)) {
+        uplineByCode.set(
+          code,
+          SubAdmin.findOne({ code }).select('_id code invite').lean()
+        );
       }
+      return uplineByCode.get(code);
+    };
 
-      console.log(
-        ` [UPDATE UPLINES] Starting from user: ${currentUser.userName} (${currentUser.code})`
-      );
-
-      while (currentUser && currentUser.invite) {
-        const uplineAdmin = await SubAdmin.findOne({
-          code: currentUser.invite,
-        });
-        if (uplineAdmin) {
-          console.log(
-            ` [UPDATE UPLINES] Updating upline: ${uplineAdmin.userName} (${uplineAdmin.code})`
-          );
-          await updateAdmin(uplineAdmin._id);
-          currentUser = uplineAdmin;
-        } else {
-          console.log(
-            ` [UPDATE UPLINES] No higher upline found for ${currentUser.userName}`
-          );
-          break;
-        }
+    // admin id -> number of ancestors above it (used to order the updates)
+    const levelById = new Map();
+    for (const startUser of startUsers) {
+      const chain = [];
+      const seen = new Set();
+      let current = startUser;
+      while (current?.invite && !seen.has(current.invite)) {
+        seen.add(current.invite);
+        const upline = await findUpline(current.invite);
+        if (!upline) break;
+        chain.push(upline);
+        current = upline;
       }
+      chain.forEach((upline, index) => {
+        levelById.set(String(upline._id), chain.length - 1 - index);
+      });
     }
 
-    console.log(` [UPDATE UPLINES] Completed all upline updates\n`);
+    // A parent sums its children's stored totals, so deeper levels go first
+    const levels = [...new Set(levelById.values())].sort((a, b) => b - a);
+    for (const level of levels) {
+      const ids = [...levelById].filter(([, l]) => l === level).map(([id]) => id);
+      for (let i = 0; i < ids.length; i += 10) {
+        await Promise.all(ids.slice(i, i + 10).map((id) => updateAdmin(id)));
+      }
+    }
   } catch (error) {
     console.error(` [UPDATE UPLINES] Error:`, error);
   }

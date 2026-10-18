@@ -12,8 +12,9 @@ export const fetchCasinoData = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const response = await api.get('/casino-data');
-      console.log('response casino', response?.data?.data?.t1);
-      return response?.data?.data?.t1;
+      const list = response?.data?.data;
+      // Provider A sends a plain array, other providers send { t1: [...] }
+      return Array.isArray(list) ? list : list?.t1 || [];
     } catch (error) {
       return rejectWithValue(
         error.response?.data?.message || 'Failed to fetch casino games'
@@ -25,7 +26,7 @@ export const fetchCasinoData = createAsyncThunk(
 // Async thunk to fetch casino betting data
 export const fetchCasinoBatingData = createAsyncThunk(
   'casino/fetchCasinoBatingData',
-  async (gameId, { rejectWithValue }) => {
+  async (eventName, { rejectWithValue }) => {
     try {
       // Cancel previous request if it exists
       if (bettingAbortController) {
@@ -36,12 +37,12 @@ export const fetchCasinoBatingData = createAsyncThunk(
       // Create new AbortController for this request
       bettingAbortController = new AbortController();
 
-      console.log('[FETCH] Starting betting fetch for gameId:', gameId);
-      const response = await api.get(`/casino-betting-data?gameId=${gameId}`, {
+      console.log('[FETCH] Starting betting fetch for eventName:', eventName);
+      const response = await api.get(`/casino-betting-data?eventName=${eventName}`, {
         signal: bettingAbortController.signal,
       });
 
-      console.log(' [SUCCESS] Betting fetch completed for gameId:', gameId);
+      console.log(' [SUCCESS] Betting fetch completed for eventName:', eventName);
       return response.data.data;
     } catch (error) {
       // Ignore aborted requests
@@ -51,8 +52,8 @@ export const fetchCasinoBatingData = createAsyncThunk(
         error.code === 'ERR_CANCELED'
       ) {
         console.log(
-          ' [ABORT] Betting request was cancelled for gameId:',
-          gameId
+          ' [ABORT] Betting request was cancelled for eventName:',
+          eventName
         );
         return rejectWithValue('Request cancelled');
       }
@@ -157,6 +158,11 @@ const casinoSlice = createSlice({
       state.resultDetailData = null;
       state.currentGameId = null;
     },
+    // Drop the previous table's data so a new game never shows stale odds
+    clearCasinoBettingData: (state) => {
+      state.battingData = null;
+      state.error.betting = null;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -181,9 +187,12 @@ const casinoSlice = createSlice({
       })
       .addCase(fetchCasinoBatingData.fulfilled, (state, action) => {
         state.loader.betting = false;
+        state.error.betting = null;
         state.battingData = action.payload;
       })
       .addCase(fetchCasinoBatingData.rejected, (state, action) => {
+        // A cancelled request just means a newer one replaced it
+        if (action.payload === 'Request cancelled') return;
         state.loader.betting = false;
         state.error.betting = action.payload;
       })
@@ -224,5 +233,6 @@ export const {
   setCasinoBattingData,
   setCasinoResultData,
   clearCasinoResultData,
+  clearCasinoBettingData,
 } = casinoSlice.actions;
 export default casinoSlice.reducer;

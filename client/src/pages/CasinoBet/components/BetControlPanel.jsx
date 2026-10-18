@@ -1,7 +1,10 @@
 import React, { memo, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { QUICK_AMOUNTS } from '../constants';
-import { formatToK } from '../utils/bettingUtils';
+import {
+  formatToK,
+  getBetPlacement,
+  getCasinoQuickAmounts,
+} from '../utils/bettingUtils';
 import { FaMinus, FaPlus } from 'react-icons/fa';
 import { BiPlus, BiMinus } from 'react-icons/bi';
 /**
@@ -20,45 +23,21 @@ const BetControlPanel = memo(function BetControlPanel({
   isVisible = true,
 }) {
   const { userInfo } = useSelector((state) => state.auth);
-  const amounts = (() => {
-    const saved = userInfo?.casinoQuickStakes;
-    if (!saved?.length) return QUICK_AMOUNTS;
-    return QUICK_AMOUNTS.map((def, i) => {
-      const item = saved[i];
-      if (!item) return def;
-      if (typeof item === 'object' && item.label && item.value) {
-        return { amt: item.value, label: item.label, img: def.img };
-      }
-      if (typeof item === 'number' && item > 0) {
-        return { amt: item, label: def.label, img: def.img };
-      }
-      return def;
-    });
-  })();
+  const amounts = getCasinoQuickAmounts(userInfo);
 
   const [selectedIncrement, setSelectedIncrement] = useState(amounts[0].amt);
 
   if (!isVisible || !betControl) return null;
 
   const handlePlaceBet = async () => {
-    const betType = betControl?.type;
-    let teamName = betControl?.nat;
-    let subtype = '';
-
-    if (betControl?.subtype === 'poker20') {
-      const suffix = betControl?.sid >= 11 && betControl?.sid <= 19 ? 'A' : 'B';
-      teamName = suffix === 'A' ? 'Player A' : 'Player B';
-      subtype = `${betControl?.nat} ${suffix}`;
-    }
-
-    const maxAmount = betControl?.max || 100000;
-    const oddsValue = betControl?.odds || betOdds;
+    const { betType, teamName, subtype, maxAmount, oddsValue } =
+      getBetPlacement(betControl, betOdds);
     await onPlaceBet(betType, teamName, maxAmount, oddsValue, subtype);
   };
 
   return (
     <div
-      className={`w-full pt-0.5 text-black ${betControl?.type === 'back' ? 'bg-[#beddf4]' : 'bg-[#f3dce2]'}`}
+      className={`w-full pt-0.5 text-black lg:hidden ${betControl?.type === 'back' ? 'bg-[#beddf4]' : 'bg-[#f3dce2]'}`}
     >
       {/* Main Controls */}
       <div className='grid w-full grid-cols-2 gap-2.5 p-1 text-[14px] md:grid-cols-4'>

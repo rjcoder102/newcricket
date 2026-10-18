@@ -1,3 +1,5 @@
+import { QUICK_AMOUNTS } from '../constants';
+
 /**
  * Format number to K format (e.g., 1000 -> 1k)
  */
@@ -197,4 +199,56 @@ export const hasLayOption = (sub) => {
   return (
     Array.isArray(sub) && sub.some((p) => p.l !== undefined && p.l !== null)
   );
+};
+
+/**
+ * Quick stake buttons: the user's saved casino stakes, falling back to defaults
+ */
+export const getCasinoQuickAmounts = (userInfo) => {
+  const saved = userInfo?.casinoQuickStakes;
+  if (!saved?.length) return QUICK_AMOUNTS;
+  return QUICK_AMOUNTS.map((def, i) => {
+    const item = saved[i];
+    if (!item) return def;
+    if (typeof item === 'object' && item.label && item.value) {
+      return { amt: item.value, label: item.label, img: def.img };
+    }
+    if (typeof item === 'number' && item > 0) {
+      return { amt: item, label: def.label, img: def.img };
+    }
+    return def;
+  });
+};
+
+/**
+ * Translate the selected option into the arguments placeBet expects
+ */
+export const getBetPlacement = (betControl, betOdds) => {
+  let teamName = betControl?.nat;
+  let subtype = '';
+
+  if (betControl?.subtype === 'poker20') {
+    const suffix = betControl?.sid >= 11 && betControl?.sid <= 19 ? 'A' : 'B';
+    teamName = suffix === 'A' ? 'Player A' : 'Player B';
+    subtype = `${betControl?.nat} ${suffix}`;
+  }
+
+  return {
+    betType: betControl?.type,
+    teamName,
+    subtype,
+    maxAmount: betControl?.max || 100000,
+    oddsValue: betControl?.odds || betOdds,
+  };
+};
+
+/**
+ * Compact range label, e.g. 200000 -> "2L"
+ */
+export const formatStakeLimit = (num) => {
+  const n = Number(num);
+  if (!n) return '0';
+  if (n >= 10000000) return `${+(n / 10000000).toFixed(2)}Cr`;
+  if (n >= 100000) return `${+(n / 100000).toFixed(2)}L`;
+  return String(n);
 };

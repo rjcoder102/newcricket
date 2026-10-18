@@ -22,6 +22,7 @@ import AgentLIst from './pages/AgentLIst';
 import PrivateRoute from './components/PrivateRoute';
 import MasterBanking from './pages/MasterBanking';
 import UserProfile from './pages/UserProfile';
+import AddAccount from './pages/AddAccount';
 import EventPLteams from './pages/EventPLteams';
 import EventPLmaster from './pages/EventPLmaster';
 import EventPLuser from './pages/EventPLuser';
@@ -47,6 +48,11 @@ function App() {
                 <Route path='/' element={<PrivateRoute />}>
                   <Route path='/home' element={<Home />} />
                   <Route path='/user-download-list' element={<Userlist />} />
+                  <Route path='/add-account' element={<AddAccount />} />
+                  <Route
+                    path='/add-agent-account'
+                    element={<AddAccount mode='agent' />}
+                  />
                   <Route path='/agent-download-list' element={<AgentLIst />} />
                   <Route path='/my-account' element={<MyAccount />} />
                   <Route path='/secureauth' element={<Security />} />

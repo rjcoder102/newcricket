@@ -8,6 +8,7 @@ import Normal from './Normal';
 import Fancy1 from './Fancy1';
 import Khado from './Khado';
 import OddEven from './OddEven';
+import CricketMarket from './CricketMarket';
 import MatchedBet from './MatchedBet';
 import PlaceBet from './PlaceBet';
 import { getUser } from '../../redux/reducer/authReducer';
@@ -24,6 +25,7 @@ import { toast } from 'react-toastify';
 import { host } from '../../redux/api';
 import { getLiveTvUrl } from '../../utils/liveTvUrl';
 import { getCricketScorecardUrl } from '../../utils/scorecardUrl';
+import LiveScoreCard from './LiveScoreCard';
 function CricketBet() {
   const { game, id } = useParams();
   const location = useLocation();
@@ -63,6 +65,17 @@ function CricketBet() {
   const streamGmid = beventId || gameid;
   const liveTvUrl = getLiveTvUrl(4, streamGmid);
   const scorecardUrl = getCricketScorecardUrl(streamGmid);
+  const [scoreData, setScoreData] = useState(null);
+  const [scoreTimedOut, setScoreTimedOut] = useState(false);
+
+  // If the shared score feed has nothing for this match, fall back to the
+  // hosted scorecard page so the user still sees a score.
+  useEffect(() => {
+    setScoreData(null);
+    setScoreTimedOut(false);
+    const timer = setTimeout(() => setScoreTimedOut(true), 8000);
+    return () => clearTimeout(timer);
+  }, [streamGmid]);
 
   const subTabs = [
     { id: 'Normal', name: 'ALL' },
@@ -118,6 +131,7 @@ function CricketBet() {
           gameid,
           apitype: 'cricket',
           userId: userInfo?._id,
+          scoreEventId: String(streamGmid),
         })
       );
     };
@@ -125,6 +139,12 @@ function CricketBet() {
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
+        if (message.type === 'scoreData') {
+          if (message.scoreEventId === String(streamGmid)) {
+            setScoreData(message.data);
+          }
+          return;
+        }
         if (message.gameid === gameid) {
           setBettingData(message.data);
         }
@@ -142,7 +162,7 @@ function CricketBet() {
     };
 
     return () => socket.close();
-  }, [gameid, userInfo?._id]);
+  }, [gameid, streamGmid, userInfo?._id]);
 
   useEffect(() => {
     let intervalId;
@@ -194,7 +214,7 @@ function CricketBet() {
     }
   }, [successMessage, errorMessage, dispatch, gameid]);
 
-  // console.log('bettting data', bettingData);
+  console.log('bettting data111', bettingData);
 
   const matchOddsList = Array.isArray(bettingData)
     ? bettingData.filter(
@@ -208,12 +228,10 @@ function CricketBet() {
   const tiedMatchList = Array.isArray(bettingData)
     ? bettingData.filter(
         (item) =>
-          item?.mname === 'Tied Match' || item?.mname === 'Bookmaker IPL CUP'
+          item?.mname === 'Tied Match' ||
+          item?.mname === 'TIED_MATCH' ||
+          item?.mname === 'Bookmaker IPL CUP'
       )
-    : [];
-
-  const newtiedMatchList = Array.isArray(bettingData)
-    ? bettingData.filter((item) => item?.mname === 'TIED_MATCH')
     : [];
 
   const BookmakerList = Array.isArray(bettingData)
@@ -287,6 +305,25 @@ function CricketBet() {
 
   console.log('oddEvenData from cricketbet', oddEvenData);
 
+  const knownMarketNames = new Set([
+    'MATCH_ODDS',
+    'TOURNAMENT_WINNER',
+    'Tied Match',
+    'TIED_MATCH',
+    'Bookmaker IPL CUP',
+    'Bookmaker',
+    'fancy1',
+    'Normal',
+    'khado',
+    'oddeven',
+  ]);
+  const otherMarkets = (Array.isArray(bettingData) ? bettingData : []).filter(
+    (market) =>
+      !knownMarketNames.has(market?.mname) &&
+      Array.isArray(market?.section) &&
+      market.section.length > 0
+  );
+
   return (
     <div className='mt-0.5 flex gap-px'>
       <div className='ml-0 w-full md:ml-1 lg:w-[calc(100%-352px)]'>
@@ -308,7 +345,7 @@ function CricketBet() {
             className={`flex w-full items-center justify-center border-r border-r-[#FFFFFF] p-2 ${showodds ? '' : 'border-t-2 border-t-[#cccccc]'}`}
             onClick={() => setshowodds(false)}
           >
-            MATCHED BET111
+            MATCHED BET
           </div>
           <div
             className={`flex w-full cursor-pointer items-center justify-center p-2`}
@@ -321,9 +358,10 @@ function CricketBet() {
           </div>
         </div>
 
-        {/* {showodds && ( */}
+        {showodds && (
           <div>
-            {!showLive && scorecardUrl && (
+            {!showLive && scoreData && <LiveScoreCard data={scoreData} />}
+            {!showLive && !scoreData && scoreTimedOut && scorecardUrl && (
               <iframe
                 src={scorecardUrl}
                 allowFullScreen
@@ -357,6 +395,23 @@ function CricketBet() {
                     gyroscope
                   '
                 />
+                {!showLive && scoreData && <LiveScoreCard data={scoreData} />}
+            { scoreTimedOut && scorecardUrl && (
+              <iframe
+                src={scorecardUrl}
+                allowFullScreen
+                className='w-full'
+                title='Live Score'
+                allow='
+                        autoplay;
+                        encrypted-media;
+                        fullscreen;
+                        picture-in-picture;
+                        accelerometer;
+                        gyroscope
+                      '
+              />
+            )}
               </div>
             )}
             {/** Match Odds */}
@@ -433,6 +488,14 @@ function CricketBet() {
               />
             )}
 
+            {otherMarkets.map((market) => (
+              <CricketMarket
+                key={`${market.gmid || gameid}-${market.mid || market.mname}`}
+                market={market}
+                onBetSelect={handleBetSelect}
+              />
+            ))}
+
             {/** New Tied Match */}
             {/* {newtiedMatchList.length > 0 && (
               <TiedMatch
@@ -443,9 +506,9 @@ function CricketBet() {
               />
             )} */}
           </div>
-        {/* )} */}
+   )}
         {!showodds && (
-          <div className='block lg:hidden'>
+          <div className='block'>
             <MatchedBet gameid={gameid} />
           </div>
         )}

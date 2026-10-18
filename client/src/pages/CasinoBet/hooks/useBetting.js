@@ -5,6 +5,7 @@ import { toast } from 'react-toastify';
 import { getUser, messageClear } from '../../../redux/reducer/authReducer';
 import {
   createBet,
+  getBetHistory,
   getPendingBet,
   getPendingBetAmo,
 } from '../../../redux/reducer/betReducer';
@@ -121,6 +122,11 @@ export const useBetting = ({ gameid, bettingData }) => {
         return;
       }
 
+      if (betControl?.min && betAmount < betControl.min) {
+        toast.error(`Minimum bet amount is ${betControl.min}`);
+        return;
+      }
+
       if (!userInfo) {
         toast.error('User data not found. Please refresh the page.');
         return;
@@ -170,6 +176,14 @@ export const useBetting = ({ gameid, bettingData }) => {
         if (result.type === 'bet/create/fulfilled') {
           dispatch(getUser());
           dispatch(getPendingBet());
+          dispatch(
+            getBetHistory({
+              gameid,
+              page: 1,
+              limit: 10,
+              selectedVoid: 'unsettel',
+            })
+          );
           await dispatch(getPendingBetAmo(gameid));
           setBetAmount(0);
           setBetControl(null);
@@ -179,7 +193,7 @@ export const useBetting = ({ gameid, bettingData }) => {
         setLoader(false);
       }
     },
-    [gameid, betAmount, userInfo, formData, bettingData, dispatch]
+    [gameid, betAmount, betControl, userInfo, formData, bettingData, dispatch]
   );
 
   // Handle success/error messages

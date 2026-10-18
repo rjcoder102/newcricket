@@ -41,8 +41,8 @@ export const sendBetIncoming = (payload) =>
   activeProvider.sendBetIncoming(payload);
 
 export const fetchCasinoTables = () => activeProvider.fetchCasinoTables();
-export const fetchCasinoData = (gameId) =>
-  activeProvider.fetchCasinoData(gameId);
+export const fetchCasinoData = (eventName) =>
+  activeProvider.fetchCasinoData(eventName);
 export const fetchCasinoResult = (gameId) =>
   activeProvider.fetchCasinoResult(gameId);
 export const fetchCasinoDetailResult = (gameId, mid) =>

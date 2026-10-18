@@ -110,22 +110,48 @@ export function createProviderA() {
 
     async fetchCasinoTables() {
       const response = await axios.get(
-        `${API_URL}/casino/tableid?key=${API_KEY}`,
+        `${API_URL}/diamond/direct-casino-table-list?key=${API_KEY}`,
         { timeout: 10000 }
       );
+
       return response.data;
     },
+    // async fetchCasinoTables() {
+    //   console.log('Fetching casino tables...');
+    //   const response = await axios.get(
+    //     `${API_URL}/casino/tableid?key=${API_KEY}`,
+    //     // { timeout: 10000 }
+    //   );
+    //   console.log('Fetched casino tables:', response);
 
-    async fetchCasinoData(gameId) {
+    //   return response.data;
+    // },
+
+    async fetchCasinoData(eventName) {
       const response = await axios.get(
-        `${API_URL}/casino/data?key=${API_KEY}&type=${gameId}`
+        `${API_URL}/diamond/direct-casino/data/${encodeURIComponent(eventName)}?key=${API_KEY}`,
+        { timeout: 10000 }
       );
-      return response.data;
-    },
 
-    async fetchCasinoResult(gameId) {
+      // The provider wraps the table as { fetchedAt, eventName, data: { success, data } }.
+      // Everything downstream (socket polling, bet validation, the API) expects
+      // { success, data }, so unwrap it once here.
+      const table = response.data?.data;
+      return {
+        success: Boolean(table?.success && table?.data),
+        data: table?.data ?? null,
+      };
+    },
+    // async fetchCasinoData(gameId) {
+    // //   const response = await axios.get(
+    // //     `${API_URL}/casino/data?key=${API_KEY}&type=${gameId}`
+    // //   );
+    // //   return response.data;
+    // },
+
+    async fetchCasinoResult(eventName) {
       const response = await axios.get(
-        `${API_URL}/casino/result?key=${API_KEY}&type=${gameId}`,
+        `${API_URL}/diamond/casino/result/${encodeURIComponent(eventName)}?key=${API_KEY}`,
         { timeout: 10000 }
       );
       return response.data;

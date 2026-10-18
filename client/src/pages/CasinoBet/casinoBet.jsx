@@ -5,9 +5,11 @@ import { useParams } from 'react-router-dom';
 // Redux actions
 import {
   fetchCasinoBatingData,
+  clearCasinoBettingData,
   clearCasinoResultData,
 } from '../../redux/reducer/casinoSlice';
 import {
+  getBetHistory,
   getPendingBet,
   getPendingBetAmo,
   clearPendingBetAmounts,
@@ -19,6 +21,8 @@ import VideoStream from './components/VideoStream';
 import RecentResults from './components/RecentResults';
 import ResultPopup from './components/CasinoResult1';
 import Spinner2 from './components/Spinner2';
+import CasinoPlaceBet from './components/CasinoPlaceBet';
+import MatchedBet from '../gamedetails/MatchedBet';
 
 // Hooks
 import useBetting from './hooks/useBetting';
@@ -35,10 +39,14 @@ import { TWO_PLAYER_GAMES, getWinnerMap } from './constants';
 
 export default function CasinoBet() {
   const dispatch = useDispatch();
-  const { gameid } = useParams() || {};
+  const { gameid, match } = useParams() || {};
 
   // Local state
   const [bettingData, setBettingData] = useState(null);
+  // Desktop shows the bet slip + My Bet in a side column, mobile shows them inline
+  const [isDesktop, setIsDesktop] = useState(
+    () => window.matchMedia('(min-width: 1024px)').matches
+  );
   // const [videoPageLoader, setVideoPageLoader] = useState(true);
 
   // Refs
@@ -46,7 +54,7 @@ export default function CasinoBet() {
   const hasInitializedRef = useRef(false);
 
   // Redux selectors
-  const { battingData } = useSelector((state) => state.casino);
+  const { battingData, loader, error } = useSelector((state) => state.casino);
   const { userInfo } = useSelector((state) => state.auth);
 
   // Custom hooks
@@ -66,10 +74,18 @@ export default function CasinoBet() {
 
   // ============== EFFECTS ==============
 
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1024px)');
+    const onChange = (e) => setIsDesktop(e.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
   // Fetch betting data when game changes
   useEffect(() => {
     if (gameid) {
       dispatch(clearCasinoResultData());
+      dispatch(clearCasinoBettingData());
       dispatch(clearPendingBetAmounts());
       dispatch(fetchCasinoBatingData(gameid));
       dispatch(getPendingBet());
@@ -109,6 +125,14 @@ export default function CasinoBet() {
       setTimeout(() => {
         dispatch(getUser());
         dispatch(getPendingBetAmo({ gameId: gameid, roundId: currentMid }));
+        dispatch(
+          getBetHistory({
+            gameid,
+            page: 1,
+            limit: 10,
+            selectedVoid: 'unsettel',
+          })
+        );
       }, 100);
     } else if (!hasInitializedRef.current) {
       // First load - fetch pending bets for current round
@@ -147,6 +171,9 @@ export default function CasinoBet() {
     bettingData?.sub,
     TWO_PLAYER_GAMES
   );
+  const selectedSub = bettingData?.sub?.find(
+    (s) => s.sid === betting.betControl?.sid
+  );
 
   // ============== RENDER ==============
 
@@ -172,46 +199,100 @@ export default function CasinoBet() {
         </div>
       )}
 
-      {/* Video Stream with Cards and Timer */}
-      <VideoStream
-        gameid={gameid}
-        bettingData={bettingData}
-        showWinner={results.showWinner}
-        winnerLabel={winnerMap[results.resultData?.res?.[0]?.win]}
-      />
+      <div className='mt-0.5 flex gap-px'>
+        {/* Left: table, odds, results */}
+        <div className='ml-0 w-full min-w-0 md:ml-1 lg:w-[calc(100%-352px)]'>
+          <div className='bg-secondary text-secondary flex items-center justify-between gap-2 p-1 text-[12px] font-bold lg:text-[15px]'>
+            <span className='truncate uppercase'>{match || gameid}</span>
+            {bettingData?.mid && <span>Round ID: {bettingData.mid}</span>}
+          </div>
 
-      {/* Game-Specific Betting UI */}
-      <div>
-        {bettingData?.sub &&
-          renderGameUI({
-            gameid,
-            displayData,
-            bettingData,
-            resultData: results.resultData,
-            betControl: betting.betControl,
-            setBetControl: betting.setBetControl,
-            setValue: betting.setValue,
-            setSelectedTeamSubtype: betting.setSelectedTeamSubtype,
-            betAmount: betting.betAmount,
-            betOdds: betting.betOdds,
-            setBetOdds: betting.setBetOdds,
-            updateAmount: betting.updateAmount,
-            placeBet: betting.placeBet,
-            loading: betting.loading,
-            pendingBetAmounts: betting.pendingBetAmounts,
-            selectedTeamSubtype: betting.selectedTeamSubtype,
-            resetBettingState: betting.resetBettingState,
-            hasPendingBetForControl: betting.hasPendingBetForControl,
-          })}
+          {/* Video Stream with Cards and Timer */}
+          <VideoStream
+            gameid={gameid}
+            bettingData={bettingData}
+            showWinner={results.showWinner}
+            winnerLabel={winnerMap[results.resultData?.res?.[0]?.win]}
+          />
+
+          {!bettingData && !loader.betting && error.betting && (
+            <div className='bg-white p-6 text-center text-[14px] font-semibold text-[#b3001b]'>
+              {error.betting}
+            </div>
+          )}
+
+          {/* Game-Specific Betting UI */}
+          <div>
+            {bettingData?.sub &&
+              renderGameUI({
+                gameid,
+                displayData,
+                bettingData,
+                resultData: results.resultData,
+                betControl: betting.betControl,
+                setBetControl: betting.setBetControl,
+                setValue: betting.setValue,
+                setSelectedTeamSubtype: betting.setSelectedTeamSubtype,
+                betAmount: betting.betAmount,
+                betOdds: betting.betOdds,
+                setBetOdds: betting.setBetOdds,
+                updateAmount: betting.updateAmount,
+                placeBet: betting.placeBet,
+                loading: betting.loading,
+                pendingBetAmounts: betting.pendingBetAmounts,
+                selectedTeamSubtype: betting.selectedTeamSubtype,
+                resetBettingState: betting.resetBettingState,
+                hasPendingBetForControl: betting.hasPendingBetForControl,
+              })}
+          </div>
+
+          {bettingData?.remark && (
+            <div className='bg-white px-2 py-1 text-[12px] font-semibold text-[#097c93]'>
+              {bettingData.remark}
+            </div>
+          )}
+
+          {/* My Bet - mobile (desktop has it in the right column) */}
+          {!isDesktop && (
+            <div>
+              <div className='bg-secondary text-secondary p-1'>
+                <span className='font-bold'>My Bet</span>
+              </div>
+              <MatchedBet gameid={gameid} />
+            </div>
+          )}
+
+          {/* Recent Results */}
+          <RecentResults
+            gameid={gameid}
+            currentGameId={results.currentGameId}
+            results={results.resultData?.res}
+            onItemClick={results.setSelectedItem}
+          />
+        </div>
+
+        {/* Right: bet slip + my bets (desktop) */}
+        {isDesktop && (
+          <div className='sticky top-0 h-fit'>
+            <div className='w-[350px]'>
+              <CasinoPlaceBet
+                betControl={betting.betControl}
+                betOdds={betting.betOdds}
+                betAmount={betting.betAmount}
+                updateAmount={betting.updateAmount}
+                loading={betting.loading || betting.loader}
+                suspended={selectedSub?.gstatus === 'SUSPENDED'}
+                onClose={betting.resetBettingState}
+                onPlaceBet={betting.placeBet}
+              />
+              <div className='bg-secondary text-secondary p-1'>
+                <span className='font-bold'>My Bet</span>
+              </div>
+              <MatchedBet gameid={gameid} />
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* Recent Results */}
-      <RecentResults
-        gameid={gameid}
-        currentGameId={results.currentGameId}
-        results={results.resultData?.res}
-        onItemClick={results.setSelectedItem}
-      />
 
       {/* Result Detail Popup */}
       {results.selectedItem && (

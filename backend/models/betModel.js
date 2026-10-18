@@ -160,6 +160,11 @@ const betSchema = new mongoose.Schema(
   }
 );
 
+// Indexes for the hot lookups on the bet-placement path
+betSchema.index({ userId: 1, status: 1 });
+betSchema.index({ userId: 1, gameId: 1, gameType: 1, status: 1 });
+betSchema.index({ gameId: 1, eventName: 1, marketName: 1 });
+
 betSchema.pre('save', function (next) {
   if (this.isModified('status')) {
     console.log(`The status of the bet model is changing to ${this.status}`);

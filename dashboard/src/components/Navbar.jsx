@@ -5,18 +5,14 @@ import {
   IoMdRefresh,
   IoMdMenu,
 } from 'react-icons/io';
-import { AiOutlineLogout } from 'react-icons/ai';
-import { NavLink, useLocation } from 'react-router-dom';
+import { FiArrowDownCircle, FiArrowUpCircle } from 'react-icons/fi';
+import { FaSearch } from 'react-icons/fa';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { MdLogout } from 'react-icons/md';
-// import logo from "../assets/icons/theme-1709828838678-aura555.png";
-// import logo from "../../client/src/assets/icons/daimondpan (1).png"
-import logo from '../assets/icons/AURA444.png';
-import jdlogo from '../assets/jdlogo.png';
 import newshivalogo from '../assets/newshivalogo.png';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   getAdmin,
-  user_reset,
   userLogout,
   changePasswordBySubAdmin,
 } from '../redux/reducer/authReducer';
@@ -27,14 +23,17 @@ const Navbar = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
-  const { userInfo, errorMessage, successMessage, loading, isPasswordChanged } =
-    useSelector((state) => state.auth);
+  const { userInfo, loading, isPasswordChanged } = useSelector(
+    (state) => state.auth
+  );
 
-  const [activeItem, setActiveItem] = useState('Home');
   const [showPopup, setShowPopup] = useState(false);
   const [hoveredItem, setHoveredItem] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSubmenuOpen, setMobileSubmenuOpen] = useState(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
   const shouldShowPasswordPopup = isPasswordChanged === false;
   const [changeFormData, setChangeFormData] = useState({
     oldPassword: '',
@@ -60,7 +59,6 @@ const Navbar = () => {
 
       if (result.type.endsWith('/fulfilled')) {
         toast.success('Password changed successfully');
-        // ✅ Clear form
         setChangeFormData({
           oldPassword: '',
           newPassword: '',
@@ -138,41 +136,33 @@ const Navbar = () => {
     dispatch(getAdmin());
   };
 
-  const toggleMobileSubmenu = (itemName, event) => {
-    if (mobileSubmenuOpen === itemName) {
-      setMobileSubmenuOpen(null);
-    } else {
-      // Calculate position relative to viewport
-      const rect = event.target.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const dropdownHeight = 200; // Approximate dropdown height
+  const visibleSubmenu = (item) =>
+    item.submenu.filter(
+      (sub) =>
+        !(userInfo?.role === 'agent' && sub.name === 'Agent Downline List')
+    );
 
-      // Position dropdown above if near bottom of screen
-      if (rect.bottom + dropdownHeight > viewportHeight) {
-        setDropdownPosition({
-          top: rect.top - dropdownHeight,
-          left: rect.left,
-          position: 'fixed',
-        });
-      } else {
-        setDropdownPosition({
-          top: rect.bottom,
-          left: rect.left,
-          position: 'fixed',
-        });
-      }
-      setMobileSubmenuOpen(itemName);
+  const isSubmenuActive = (item) =>
+    !!item.submenu?.some((sub) => location.pathname === sub.path);
+
+  const handleSubClick = (e, item, sub) => {
+    setMobileMenuOpen(false);
+    setMobileSubmenuOpen(null);
+    setHoveredItem(null);
+    if (sub.reload) {
+      e.preventDefault();
+      navigate(sub.path);
+      window.location.reload();
     }
   };
 
-  const isSubmenuActive = (item) => {
-    if (!item.submenu) return false;
-
-    return item.submenu.some((sub) => {
-      const currentPath = location.pathname;
-      return currentPath === sub.path;
-    });
+  const handleClientSearch = (e) => {
+    e.preventDefault();
+    navigate('/user-download-list', { state: { search: clientSearch.trim() } });
+    setMobileMenuOpen(false);
   };
+
+  const roleLabel = userInfo?.role === 'white' ? 'white_label' : userInfo?.role;
 
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -181,250 +171,267 @@ const Navbar = () => {
   return (
     <>
       <div
-        className={`sticky top-0 z-10 w-full ${
+        className={`sticky top-0 z-20 w-full ${
           location.pathname == '/login' ? 'hidden' : 'block'
         }`}
       >
-        {/* Mobile Header - Split into two rows */}
-        <div className='lg:hidden'>
-          {/* Top row - Role and Name */}
-          <header className='bg-color flex h-[75px] items-center justify-between border-b border-gray-800 p-2'>
-            <div className='flex grid items-center'>
-              <img src={newshivalogo} alt='logo' className='h-[50px]' />
-            </div>
-            <div className='grid justify-items-end'>
-              <div className='flex items-center gap-2'>
-                <p
-                  className='rounded-sm bg-[#292929] px-1.5 text-[10px] text-white uppercase'
-                  style={{
-                    boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, .4)',
-                  }}
-                >
-                  {userInfo?.role === 'white' ? 'white_label' : userInfo?.role}
-                </p>
-                <p className='text-sm text-white'>{userInfo?.userName}</p>
-              </div>
-              <div className='mt-1 flex items-center gap-2'>
-                <div className='text-xs font-semibold text-white'>
-                  {loading ? (
-                    <p>Loading...</p>
-                  ) : (
-                    <p>
-                      IRP (<span className=''>{userInfo?.avbalance || 0}</span>)
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={reload}
-                  className='flex h-[25px] w-[25px] cursor-pointer items-center justify-center rounded-[2px] bg-[#2a2a2a] text-[20px] leading-[20px] text-white'
-                  style={{
-                    boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, .4)',
-                  }}
-                >
-                  <IoMdRefresh className='p-[1px]' />
-                </button>
-              </div>
-            </div>
-          </header>
-        </div>
+        {/* Top blue bar */}
+        <header className='bg-topnav relative flex min-h-[35px] items-center justify-between gap-2 px-3 text-white'>
+          <div className='flex min-w-0 items-center gap-3'>
+            <Link to='/home' className='flex shrink-0 items-center'>
+              <img src={newshivalogo} alt='logo' className='h-[30px]' />
+            </Link>
+            <button
+              type='button'
+              className='flex shrink-0 items-center text-[22px] xl:hidden'
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              aria-label='Toggle menu'
+            >
+              {mobileMenuOpen ? <IoMdClose /> : <IoMdMenu />}
+            </button>
 
-        {/* Desktop Header */}
-        <header className='bg-color hidden h-[75px] items-center justify-between border-b border-gray-800 md:px-20 lg:flex'>
-          <img src={newshivalogo} alt='logo' className='h-[70px]' />
-          <div className='mr-4 flex items-center gap-4'>
-            <div className='relative flex items-center gap-2'>
-              <p
-                className='rounded-sm bg-[#292929] px-1.5 text-[10px] text-white uppercase'
-                style={{ boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, .4)' }}
-              >
-                {userInfo?.role === 'white' ? 'white_label' : userInfo?.role}
-              </p>
-              <p className='text-sm text-white'>{userInfo?.name}</p>
-              <div className='text-sm text-[13px] font-semibold text-white'>
-                {loading ? (
-                  <p>Loading...</p>
-                ) : (
-                  <p>
-                    IRP (<span className=''>{userInfo?.avbalance || 0}</span>)
-                  </p>
-                )}
-              </div>
+            <nav className='hidden xl:block'>
+              <ul className='flex items-center'>
+                {navItems.map((item, i) => (
+                  <li
+                    key={i}
+                    className='relative'
+                    onMouseEnter={() => setHoveredItem(item.name)}
+                    onMouseLeave={() => setHoveredItem(null)}
+                  >
+                    {item.path ? (
+                      <NavLink
+                        to={item.path}
+                        className={({ isActive }) =>
+                          `block px-2.5 py-[9px] text-[12px] leading-[17px] font-bold whitespace-nowrap transition-colors hover:bg-black/10 ${
+                            isActive ? 'bg-black/15' : ''
+                          }`
+                        }
+                      >
+                        {item.name}
+                      </NavLink>
+                    ) : (
+                      <span
+                        className={`flex cursor-pointer items-center gap-0.5 px-2.5 py-[9px] text-[12px] leading-[17px] font-bold whitespace-nowrap hover:bg-black/10 ${
+                          isSubmenuActive(item) ? 'bg-black/15' : ''
+                        }`}
+                      >
+                        {item.name}
+                        <IoMdArrowDropdown className='text-[14px]' />
+                      </span>
+                    )}
+
+                    {item.submenu && hoveredItem === item.name && (
+                      <ul className='bg-topnav absolute top-full left-0 z-30 min-w-[170px] shadow-lg'>
+                        {visibleSubmenu(item).map((sub, index) => (
+                          <li
+                            key={index}
+                            className='border-t border-white/20 first:border-t-0'
+                          >
+                            <NavLink
+                              to={sub.path}
+                              className='block px-3 py-2 text-[12px] font-bold whitespace-nowrap hover:bg-black/15'
+                              onClick={(e) => handleSubClick(e, item, sub)}
+                            >
+                              {sub.name}
+                            </NavLink>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </div>
+
+          <div className='flex shrink-0 items-center gap-3'>
+            <div
+              className='relative'
+              onMouseEnter={() => setUserMenuOpen(true)}
+              onMouseLeave={() => setUserMenuOpen(false)}
+            >
               <button
-                onClick={reload}
-                className='flex h-[25px] w-[25px] cursor-pointer items-center justify-center rounded-[2px] bg-[#2a2a2a] text-[20px] leading-[20px] text-white'
-                style={{ boxShadow: 'inset 0 1px 0 0 rgba(255, 255, 255, .4)' }}
+                type='button'
+                className='flex items-center gap-0.5 py-[9px] text-[12px] leading-[17px] font-bold'
+                onClick={() => setUserMenuOpen((open) => !open)}
               >
-                <IoMdRefresh className='p-[1px]' />
+                {userInfo?.userName}
+                <IoMdArrowDropdown className='text-[14px]' />
               </button>
+              {userMenuOpen && (
+                <ul className='absolute top-full right-0 z-30 min-w-[170px] bg-white text-[12px] font-bold text-[#333] shadow-lg'>
+                  <li className='flex items-center justify-between border-b border-gray-200 px-3 py-2'>
+                    <span>IRP</span>
+                    <span>
+                      {loading ? 'Loading...' : userInfo?.avbalance || 0}
+                    </span>
+                  </li>
+                  <li>
+                    <button
+                      type='button'
+                      onClick={reload}
+                      className='flex w-full items-center gap-1 border-b border-gray-200 px-3 py-2 hover:bg-gray-100'
+                    >
+                      <IoMdRefresh /> Refresh
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      type='button'
+                      onClick={logout}
+                      className='flex w-full items-center gap-1 px-3 py-2 hover:bg-gray-100'
+                    >
+                      <MdLogout /> Logout
+                    </button>
+                  </li>
+                </ul>
+              )}
             </div>
+
+            <form
+              onSubmit={handleClientSearch}
+              className='hidden items-stretch md:flex'
+            >
+              <input
+                type='text'
+                value={clientSearch}
+                onChange={(e) => setClientSearch(e.target.value)}
+                placeholder='All Client'
+                className='h-[26px] w-[120px] rounded-l-[3px] bg-white px-2 text-[12px] text-[#333] outline-none placeholder:text-gray-400 lg:w-[150px]'
+              />
+              <button
+                type='submit'
+                className='flex h-[26px] w-[34px] items-center justify-center rounded-r-[3px] bg-white text-[16px] text-black'
+                aria-label='Search client'
+              >
+                <FaSearch />
+              </button>
+            </form>
           </div>
         </header>
 
-        {/* Mobile Navigation (Horizontal Scrollable) */}
-        <nav className='bg-color2 relative mb-[15px] overflow-x-auto leading-[30px] whitespace-nowrap text-white xl:hidden'>
-          <ul className='flex'>
-            {navItems.map((item, i) => (
-              <li
-                key={i}
-                className='relative inline-block'
-                onMouseEnter={() => setHoveredItem(item.name)}
-                onMouseLeave={() => setHoveredItem(null)}
+        {/* Mobile menu */}
+        {mobileMenuOpen && (
+          <nav className='bg-topnav max-h-[calc(100vh-35px)] overflow-y-auto border-t border-white/20 text-white xl:hidden'>
+            <form
+              onSubmit={handleClientSearch}
+              className='flex items-stretch p-2 md:hidden'
+            >
+              <input
+                type='text'
+                value={clientSearch}
+                onChange={(e) => setClientSearch(e.target.value)}
+                placeholder='All Client'
+                className='h-[30px] w-full rounded-l-[3px] bg-white px-2 text-[12px] text-[#333] outline-none'
+              />
+              <button
+                type='submit'
+                className='flex h-[30px] w-[38px] items-center justify-center rounded-r-[3px] bg-white text-black'
+                aria-label='Search client'
               >
-                {item.path ? (
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      `block border-r border-gray-500 px-3 text-[13px] font-semibold transition-colors ${
-                        isActive ? 'bg-color text-white' : 'text-black'
-                      }`
-                    }
-                    onClick={() => setActiveItem(item.name)}
-                  >
-                    {item.name}
-                  </NavLink>
-                ) : (
-                  <div className='relative'>
-                    <span
-                      className='flex cursor-pointer items-center border-r border-gray-500 px-3 text-[13px] font-semibold text-black'
-                      onClick={(e) => toggleMobileSubmenu(item.name, e)}
+                <FaSearch />
+              </button>
+            </form>
+            <ul>
+              {navItems.map((item, i) => (
+                <li key={i} className='border-b border-white/20'>
+                  {item.path ? (
+                    <NavLink
+                      to={item.path}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }) =>
+                        `block px-4 py-2 text-[13px] font-bold ${
+                          isActive ? 'bg-black/15' : ''
+                        }`
+                      }
                     >
                       {item.name}
-                      <IoMdArrowDropdown className='h-5 w-5' />
-                    </span>
-
-                    {/* Mobile Submenu Dropdown - positioned absolutely within viewport */}
-                    {mobileSubmenuOpen === item.name && (
-                      <ul
-                        className='bg-color fixed top-0 left-0 z-20 w-40 border border-gray-700 font-semibold text-white shadow-lg'
-                        style={{
-                          top: `${dropdownPosition.top}px`,
-                          left: `${dropdownPosition.left}px`,
-                          position: dropdownPosition.position,
-                        }}
-                      >
-                        {item.submenu
-                          .filter(
-                            (sub) =>
-                              !(
-                                userInfo?.role === 'agent' &&
-                                sub.name === 'Agent Downline List'
-                              )
+                    </NavLink>
+                  ) : (
+                    <>
+                      <button
+                        type='button'
+                        className={`flex w-full items-center justify-between px-4 py-2 text-[13px] font-bold ${
+                          isSubmenuActive(item) ? 'bg-black/15' : ''
+                        }`}
+                        onClick={() =>
+                          setMobileSubmenuOpen((open) =>
+                            open === item.name ? null : item.name
                           )
-                          .map((sub, index) => (
-                            <li
-                              key={index}
-                              className='border-b border-gray-700 last:border-b-0 hover:bg-gray-800'
-                            >
+                        }
+                      >
+                        {item.name}
+                        <IoMdArrowDropdown className='text-[16px]' />
+                      </button>
+                      {mobileSubmenuOpen === item.name && (
+                        <ul className='bg-black/15'>
+                          {visibleSubmenu(item).map((sub, index) => (
+                            <li key={index}>
                               <NavLink
                                 to={sub.path}
-                                className='block px-3 text-[13px]'
-                                onClick={(e) => {
-                                  setActiveItem(item.name);
-                                  setMobileSubmenuOpen(null);
-                                  if (sub.reload) {
-                                    e.preventDefault();
-                                    navigate(sub.path);
-                                    window.location.reload();
-                                  }
-                                }}
+                                className='block px-8 py-2 text-[13px] font-bold'
+                                onClick={(e) => handleSubClick(e, item, sub)}
                               >
                                 {sub.name}
                               </NavLink>
                             </li>
                           ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
+              <li>
+                <button
+                  type='button'
+                  onClick={logout}
+                  className='flex w-full items-center gap-1 px-4 py-2 text-[13px] font-bold'
+                >
+                  Logout <MdLogout />
+                </button>
               </li>
-            ))}
-            {/* Logout button in scrollable menu */}
-            <li className='inline-block'>
-              <button
-                onClick={logout}
-                className='flex items-center gap-1 border-r border-gray-500 px-3 text-[13px] font-semibold text-black'
-              >
-                Logout <MdLogout />
-              </button>
-            </li>
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        )}
 
-        {/* Desktop Navigation */}
-        <nav className='bg-color2 mb-[15px] hidden text-black xl:block'>
-          <ul className='relative mx-auto flex w-full max-w-[1350px] flex-row leading-[30px]'>
-            {navItems.map((item, i) => (
-              <li
-                key={i}
-                className='relative'
-                onMouseEnter={() => setHoveredItem(item.name)}
-                onMouseLeave={() => setHoveredItem(null)}
-              >
-                {item.path ? (
-                  <NavLink
-                    to={item.path}
-                    className={({ isActive }) =>
-                      `block border-r border-gray-500 px-2.5 text-[13px] font-semibold whitespace-nowrap transition-colors ${
-                        isActive ? 'bg-color text-white' : 'text-black'
-                      }`
-                    }
-                    onClick={() => setActiveItem(item.name)}
-                  >
-                    {item.name}
-                  </NavLink>
-                ) : (
-                  <span
-                    className={`flex cursor-pointer items-center gap-[10px] border-r border-gray-500 px-3 text-[13px] font-semibold whitespace-nowrap text-black ${isSubmenuActive(item) ? 'bg-color text-white' : 'text-black'} "`}
-                  >
-                    {item.name}
-                    <IoMdArrowDropdown className='w-3' />
-                  </span>
-                )}
-
-                {/* Submenu Dropdown */}
-                {item.submenu && hoveredItem === item.name && (
-                  <ul className='bg-color absolute top-full left-0 z-20 overflow-visible font-semibold whitespace-nowrap text-white shadow-lg'>
-                    {item.submenu
-                      .filter(
-                        (sub) =>
-                          !(
-                            userInfo?.role === 'agent' &&
-                            sub.name === 'Agent Downline List'
-                          )
-                      )
-                      .map((sub, index) => (
-                        <li
-                          key={index}
-                          className='border-b border-gray-700 last:border-b-0'
-                        >
-                          <NavLink
-                            to={sub.path}
-                            className='block px-3 text-[13px]'
-                            onClick={(e) => {
-                              setActiveItem(item.name);
-                              if (sub.reload) {
-                                e.preventDefault();
-                                navigate(sub.path);
-                                window.location.reload();
-                              }
-                            }}
-                          >
-                            {sub.name}
-                          </NavLink>
-                        </li>
-                      ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-            <li
-              onClick={logout}
-              className='flex flex-1 cursor-pointer items-center justify-end gap-1 px-3 text-[13px] font-semibold whitespace-nowrap text-black transition-colors'
+        {/* Dark strip with account summary toggle */}
+        <div className='bg-[#2b3a4b] text-white'>
+          <div className='flex h-[45px] items-center justify-center'>
+            {showSummary ? (
+              <div className='flex flex-wrap items-center justify-center gap-3 px-3'>
+                <p className='rounded-sm bg-[#292929] px-1.5 text-[10px] uppercase'>
+                  {roleLabel}
+                </p>
+                <p className='text-[13px]'>{userInfo?.name}</p>
+                <p className='text-[13px] font-semibold'>
+                  {loading ? (
+                    'Loading...'
+                  ) : (
+                    <>IRP ({userInfo?.avbalance || 0})</>
+                  )}
+                </p>
+                <button
+                  type='button'
+                  onClick={reload}
+                  className='flex h-[25px] w-[25px] items-center justify-center rounded-[2px] bg-[#1d2935] text-[20px]'
+                  aria-label='Refresh balance'
+                >
+                  <IoMdRefresh />
+                </button>
+              </div>
+            ) : null}
+            <button
+              type='button'
+              onClick={() => setShowSummary((open) => !open)}
+              className='ml-3 flex items-center text-[22px] text-white/90 hover:text-white'
+              aria-label='Toggle account summary'
             >
-              Logout <MdLogout />
-            </li>
-          </ul>
-        </nav>
+              {showSummary ? <FiArrowUpCircle /> : <FiArrowDownCircle />}
+            </button>
+          </div>
+        </div>
 
         {/* Popup */}
         {showPopup && (

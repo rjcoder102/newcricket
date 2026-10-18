@@ -1,417 +1,4 @@
-// import React, { useState, useEffect } from 'react'
-// import { useDispatch, useSelector } from 'react-redux'
-// import { createBet, createfancyBet, getPendingBetAmo, messageClear } from '../../redux/reducer/betReducer'
-// import { getUser } from '../../redux/reducer/authReducer'
-// import { toast } from 'react-toastify'
 
-// function PlaceBet({
-//   selectedBet,
-//   onBetChange,
-//   onClose,
-//   isMobile = false,
-//   team1,
-//   team2,
-//   gameId,
-//   eventName,
-//   marketName,
-//   gameType,
-//   gameName = 'Cricket Game',
-//   maxAmount,
-//   minAmount,
-//   fancyScore
-// }) {
-//   console.log("selectedBet",selectedBet);
-//   const dispatch = useDispatch()
-//   const { loading, errorMessage, successMessage } = useSelector((state) => state.bet)
-
-//   const [stake, setStake] = useState('')
-//   const [odds, setOdds] = useState(selectedBet?.odds || '')
-//   const [betFor, setBetFor] = useState(selectedBet?.team || '')
-//   const [betType, setBetType] = useState(selectedBet?.type || '') // 'back' or 'lay'
-//   const prevBetKeyRef = React.useRef('')
-
-//   useEffect(() => {
-//     if (selectedBet) {
-//       // Create a unique key for the bet selection (excluding stake)
-//       const currentBetKey = `${selectedBet.team}-${selectedBet.odds}-${selectedBet.sid}-${selectedBet.type}`
-
-//       // Only reset stake if the bet selection actually changed (different team/odds/sid)
-//       if (currentBetKey !== prevBetKeyRef.current) {
-//       setBetFor(selectedBet.team || '')
-//       setOdds(selectedBet.odds || '')
-//       setBetType(selectedBet.type || '')
-//         setStake('') // Reset stake when bet selection changes
-//         prevBetKeyRef.current = currentBetKey
-//       }
-//       // Don't update stake from selectedBet when user is typing - let local state handle it
-//     }
-//   }, [selectedBet])
-
-//   // Toast messages are now handled in the parent component (CricketBet/FootballBet/TennisBet)
-//   // to prevent duplicate toasts from multiple PlaceBet component instances
-
-//   useEffect(() => {
-//     dispatch(getUser())
-//   }, [dispatch])
-
-//   // Calculate profit based on stake and odds
-//   const calculateProfit = () => {
-//     if (!stake || !odds) return '0'
-//     const stakeNum = parseFloat(stake)
-//     const oddsNum = parseFloat(odds)
-//     if (isNaN(stakeNum) || isNaN(oddsNum)) return '0'
-
-//     // For back: profit = stake * (odds - 1)
-//     // For lay: profit = stake * (1 - odds) but typically calculated differently
-//     // Based on the image showing positive profit, assuming back bet calculation
-//     const profitValue = stakeNum * (oddsNum - 1)
-//     return profitValue.toFixed(2)
-//   }
-
-//   const profit = calculateProfit()
-
-//   // Get all teams from selectedBet, fallback to team1/team2 if not available
-//   const allTeams = selectedBet?.teams && selectedBet.teams.length > 0
-//     ? selectedBet.teams
-//     : (team1 && team2 ? [team1, team2] : []);
-
-//   // Get the other team name (for backward compatibility)
-//   const getOtherTeam = () => {
-//     if (!team1 || !team2) return ''
-//     return betFor === team1 ? team2 : team1
-//   }
-
-//   const otherTeam = getOtherTeam()
-
-//   // Format number with commas
-//   const formatNumber = (num) => {
-//     if (!num || num === '0') return '0'
-//     const numValue = parseFloat(num)
-//     if (isNaN(numValue)) return '0'
-//     return numValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-//   }
-
-//   const handleStakeChange = (value) => {
-//     setStake(value)
-//     // Update selectedBet with stake for suggestion calculations
-//     if (onBetChange && selectedBet) {
-//       onBetChange({ ...selectedBet, stake: value })
-//     }
-//   }
-
-//   const handleQuickStake = (amount) => {
-//     const currentStake = parseFloat(stake) || 0
-//     const newStake = (currentStake + amount).toString()
-//     setStake(newStake)
-//     // Update selectedBet with stake for suggestion calculations
-//     if (onBetChange && selectedBet) {
-//       onBetChange({ ...selectedBet, stake: newStake })
-//     }
-//   }
-
-//   const handleClearStake = () => {
-//     setStake('')
-//   }
-
-//   const handleOddsChange = (value) => {
-//     setOdds(value)
-//     if (onBetChange && selectedBet) {
-//       onBetChange({ ...selectedBet, odds: value })
-//     }
-//   }
-
-//   const handleOddsIncrement = () => {
-//     const currentOdds = parseFloat(odds) || 0
-//     handleOddsChange((currentOdds + 0.01).toFixed(2))
-//   }
-
-//   const handleOddsDecrement = () => {
-//     const currentOdds = parseFloat(odds) || 0
-//     if (currentOdds > 0.01) {
-//       handleOddsChange((currentOdds - 0.01).toFixed(2))
-//     }
-//   }
-
-//   const handleReset = () => {
-//     setStake('')
-//     setOdds(selectedBet?.odds || '')
-//     setBetFor(selectedBet?.team || '')
-//   }
-
-//   const handleSubmit = async () => {
-//     if (!stake || !odds || !betFor) {
-//       toast.error('Please fill in all required fields')
-//       return
-//     }
-
-//     const stakeNum = parseFloat(stake)
-//     const oddsNum = parseFloat(odds)
-
-//     if (isNaN(stakeNum) || isNaN(oddsNum)) {
-//       toast.error('Please enter valid stake and odds')
-//       return
-//     }
-
-//     // Validate min/max amounts
-//     if (minAmount && stakeNum < minAmount) {
-//       toast.error(`Minimum bet amount is ${minAmount}`)
-//       return
-//     }
-
-//     if (maxAmount && stakeNum > maxAmount) {
-//       toast.error(`Maximum bet amount is ${maxAmount}`)
-//       return
-//     }
-
-//     // Determine if this is a fancy bet (Normal, meter, line, ball, khado, oddeven, fancy1)
-//     const fancyBetTypes = ['Normal', 'meter', 'line', 'ball', 'khado', 'oddeven', 'fancy1']
-//     const isFancyBet = fancyBetTypes.includes(gameType)
-
-//     const formData = {
-//       gameId: gameId,
-//       sid: selectedBet?.sid || 4,
-//       otype: betType,
-//       price: stakeNum,
-//       xValue: oddsNum.toString(),
-//       gameType: gameType,
-//       marketName: marketName || gameType,
-//       eventName: eventName,
-//       gameName: gameName,
-//       teamName: betFor,
-//       fancyScore: fancyScore || null,
-//     }
-
-//     try {
-//       if (isFancyBet) {
-//         await dispatch(createfancyBet(formData))
-//       } else {
-//         await dispatch(createBet(formData))
-//       }
-
-//       // Refresh user data and pending bets
-//       await dispatch(getUser())
-//       if (gameId) {
-//         dispatch(getPendingBetAmo(gameId))
-//       }
-
-//       // Reset form and close modal
-//       setStake('')
-//       if (onClose) {
-//         onClose()
-//       }
-//     } catch (error) {
-//       console.error('Error placing bet:', error)
-//     }
-//   }
-
-//   const handleEdit = () => {
-//     // Handle edit logic here
-//     console.log('Editing bet')
-//   }
-
-//   if (!selectedBet) {
-//     return (
-//       null
-//     )
-//   }
-
-//   return (
-//     <div className='bg-white'>
-//       {/* Header */}
-//       <div className={`${isMobile?"bg-primary":"bg-secondary"} text-white font-bold p-1 text-[15px] flex justify-between items-center`}>
-//         <span>Place Bet</span>
-//         {isMobile && onClose && (
-//           <div className='flex items-center gap-2'>
-//             <span className='text-[12px]'>Profit: {profit}</span>
-//             <button
-//               onClick={onClose}
-//               className='text-white hover:text-gray-200 text-[20px] font-normal'
-//               style={{ lineHeight: '1' }}
-//             >
-//               ×
-//             </button>
-//           </div>
-//         )}
-//       </div>
-
-//       {/* Betting Details Table */}
-
-//         {/* Table Headers */}
-//         <div className='grid grid-cols-4 bg-[#cccccc] text-black text-[12px] font-bold'>
-//           <div className='p-2 '>(Bet for)</div>
-//           <div className='p-2 '>Odds</div>
-//           <div className='p-2 '>Stake</div>
-//           <div className='p-2'>Profit</div>
-//         </div>
-
-//         <div className={`${betType === 'back' ? 'bg-[#72bbef]' : 'bg-[#faa9ba]'}`}>
-//           {/* Table Data Row */}
-//         <div className={`grid grid-cols-4  text-black text-[12px]`}>
-//           <div className='p-2  text-[#000000] text-[12px] '>{betFor}</div>
-//           <div className='p-2 flex  gap-1'>
-//             <input
-//               type='number'
-//               value={odds}
-//               onChange={(e) => handleOddsChange(e.target.value)}
-//               step='0.01'
-//               min='0.01'
-//               className='w-full h-[25px] bg-white  px-1 py-0.5 text-[12px]'
-//             />
-//             <div className='flex flex-col'>
-//               <button
-//                 onClick={handleOddsIncrement}
-//                 className='text-[10px] leading-none  bg-white hover:bg-gray-100'
-//                 style={{ width: '16px', height: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-//               >
-//                 ▲
-//               </button>
-//               <button
-//                 onClick={handleOddsDecrement}
-//                 className='text-[10px] leading-none  bg-white hover:bg-gray-100'
-//                 style={{ width: '16px', height: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
-//               >
-//                 ▼
-//               </button>
-//             </div>
-//           </div>
-//           <div className='p-2 '>
-//             <input
-//               type='number'
-//               value={stake}
-//               onChange={(e) => handleStakeChange(e.target.value)}
-//               placeholder=''
-//               className='w-full h-[25px] bg-white px-1 py-0.5 text-[12px]'
-//             />
-//           </div>
-//           <div className='p-2'>{profit}</div>
-//         </div>
-
-//       {/* Quick Stake Buttons */}
-//       <div className=' p-2'>
-//         <div className='flex  gap-1 mb-1'>
-//           <button
-//             onClick={() => handleQuickStake(1000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +1k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(2000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +2k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(5000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +5k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(10000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +10k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(20000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +20k
-//           </button>
-//         </div>
-//         <div className='flex gap-1'>
-//           <button
-//             onClick={() => handleQuickStake(25000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +25k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(50000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +50k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(75000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +75k
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(100000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +1L
-//           </button>
-//           <button
-//             onClick={() => handleQuickStake(200000)}
-//             className='bg-[#cccccc] hover:bg-gray-500 text-[#000000] px-4 py-1 text-[14px] font-bold w-[calc(20%-2px)]'
-//           >
-//             +2L
-//           </button>
-//         </div>
-//         <div className='flex justify-end mt-1'>
-//           <button
-//             onClick={handleClearStake}
-//             className='text-[#212529] underline text-[12px] cursor-pointer'
-//           >
-//             clear
-//           </button>
-//         </div>
-//       </div>
-
-//       {/* Action Buttons */}
-//       <div className='flex gap-1 p-2'>
-//         <button
-//           onClick={handleEdit}
-//           className='flex-1 bg-[#097c93] border border-[#097c93] hover:bg-[#086a82] text-white font-bold py-2 text-[12px]'
-//         >
-//           Edit
-//         </button>
-//         <button
-//           onClick={handleReset}
-//           className='flex-1 bg-[#bd1828] border border-[#bd1828] hover:bg-[#c82333] text-white font-bold py-2 text-[12px]'
-//         >
-//           Reset
-//         </button>
-//         <button
-//           onClick={handleSubmit}
-//           disabled={loading}
-//           className={`flex-1 bg-[#198754] border border-[#198754] hover:bg-[#157347] text-white font-bold py-2 text-[12px] ${
-//             loading ? 'cursor-not-allowed opacity-70' : ''
-//           }`}
-//         >
-//           {loading ? 'Placing...' : (isMobile ? 'Place Bet' : 'Submit')}
-//         </button>
-//       </div>
-
-//       {/* Bet Summary Footer - Mobile Only */}
-//       {isMobile && allTeams.length > 0 && (
-//         <div className={`${betType === 'back' ? 'bg-[#ffffff45]' : 'bg-[#ffffff45]'} p-2`}>
-//           {allTeams.map((team, index) => (
-//             <div key={index} className='flex justify-between items-center mb-1'>
-//               <span className='text-black text-[12px]'>{team}</span>
-//             {stake && (
-//                 <span className={`text-[12px] font-semibold ${
-//                   team === betFor
-//                     ? 'text-[#28a745]' // Green for selected team/item (profit)
-//                     : 'text-[#dc3545]' // Red for other teams/items (loss)
-//                 }`}>
-//                   {team === betFor ? formatNumber(profit) : `-${formatNumber(stake)}`}
-//                 </span>
-//             )}
-//           </div>
-//           ))}
-//         </div>
-//       )}
-//         </div>
-//     </div>
-//   )
-// }
-
-// export default PlaceBet
 
 import React, { useState, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -594,6 +181,13 @@ function PlaceBet({
   const matchesMarketGameType = (item) => {
     const gameTypeToMatch = gameType || marketName || '';
     const marketNameToMatch = marketName || gameType || '';
+    if (
+      (gameType === 'Match Odds' || gameType === 'Winner') &&
+      marketName &&
+      item.marketName !== marketName
+    ) {
+      return false;
+    }
     return (
       item.gameType === gameTypeToMatch ||
       item.gameType === marketNameToMatch ||
@@ -1169,6 +763,7 @@ function PlaceBet({
       sid: sid,
       otype: betType,
       oname: selectedBet?.oname || '',
+      tno: selectedBet?.tno,
       price: stakeNum,
       xValue: finalXValue,
       gameType: gameType,
@@ -1186,8 +781,14 @@ function PlaceBet({
         await dispatch(createBet(formData));
       }
 
-      // Refresh user data and pending bets
-      await dispatch(getUser());
+      // Close right away; balances are also pushed over the websocket, so the
+      // refreshes below run in the background instead of delaying the UI.
+      setStake('');
+      if (onClose) {
+        onClose();
+      }
+
+      dispatch(getUser());
       if (gameId) {
         dispatch(getPendingBetAmo(gameId));
         dispatch(
@@ -1198,12 +799,6 @@ function PlaceBet({
             selectedVoid: 'unsettel',
           })
         );
-      }
-
-      // Reset form and close modal
-      setStake('');
-      if (onClose) {
-        onClose();
       }
     } catch (error) {
       console.error('Error placing bet:', error);

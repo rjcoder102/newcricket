@@ -1,9 +1,9 @@
 import dotenv from 'dotenv';
 
 import {
-  fetchCasinoData as fetchCasinoDataApi,
   fetchMatchData,
 } from '../services/matchApi/index.js';
+import { getCasinoTable } from '../services/casinoTableCache.js';
 
 dotenv.config();
 
@@ -25,6 +25,15 @@ const API_MARKET_ALIASES = {
 };
 
 const MAX_CACHE_AGE_MS = 1000;
+const LIVE_FETCH_TIMEOUT_MS = 5000;
+
+const withTimeout = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Live odds fetch timed out')), ms)
+    ),
+  ]);
 
 /**
  * Fetch fresh live data from API. ALWAYS fetches — never trusts the polling cache.
@@ -37,7 +46,10 @@ async function fetchFreshSportsData(cachedData, gameId, apitype, sid) {
   const cacheKey = `${gameId}_${apitype}`;
 
   try {
-    const newData = await fetchMatchData(gameId, sid);
+    const newData = await withTimeout(
+      fetchMatchData(gameId, sid),
+      LIVE_FETCH_TIMEOUT_MS
+    );
 
     if (!newData?.success || !Array.isArray(newData.data)) {
       return {
@@ -73,11 +85,13 @@ async function fetchFreshSportsData(cachedData, gameId, apitype, sid) {
   }
 }
 
-async function fetchFreshCasinoData(cachedData, gameId) {
-  const cacheKey = `betting_${gameId}_casino`;
+// A bet is validated against table data at most this old. Bets arriving in the same
+// window share one provider request (see services/casinoTableCache.js).
+const CASINO_VALIDATION_MAX_AGE_MS = 500;
 
+async function fetchFreshCasinoData(cachedData, gameId) {
   try {
-    const newData = await fetchCasinoDataApi(gameId);
+    const newData = await getCasinoTable(gameId, CASINO_VALIDATION_MAX_AGE_MS);
 
     if (!newData?.success || !newData.data) {
       return {
@@ -86,24 +100,8 @@ async function fetchFreshCasinoData(cachedData, gameId) {
       };
     }
 
-    cachedData[cacheKey] = {
-      data: newData.data,
-      raw: newData,
-      lastUpdated: Date.now(),
-    };
-
     return { ok: true, data: newData.data };
   } catch (err) {
-    const cacheEntry = cachedData[cacheKey];
-    const now = Date.now();
-    if (
-      cacheEntry?.lastUpdated &&
-      now - cacheEntry.lastUpdated <= 500 &&
-      cacheEntry.data
-    ) {
-      return { ok: true, data: cacheEntry.data };
-    }
-
     return {
       ok: false,
       reason: 'Unable to verify live casino odds. Please try again.',
@@ -131,6 +129,7 @@ export async function validateSportsMarket(
     sid,
     oname,
     gameType,
+    tno,
   }
 ) {
   const apitype = SPORT_NAME_TO_APITYPE[gameName?.toLowerCase()] || 'cricket';
@@ -246,7 +245,11 @@ export async function validateSportsMarket(
       : otype;
   const liveOddsObj = oname
     ? teamSection.odds.find((o) => o.oname === oname)
-    : teamSection.odds.find((o) => o.otype === effectiveOtype && o.tno === 0);
+    : teamSection.odds.find(
+        (o) =>
+          o.otype === effectiveOtype &&
+          String(o.tno ?? 0) === String(tno ?? 0)
+      );
   const liveOdds = liveOddsObj ? parseFloat(liveOddsObj.odds) : null;
 
   if (liveOdds === null || isNaN(liveOdds) || liveOdds <= 0) {

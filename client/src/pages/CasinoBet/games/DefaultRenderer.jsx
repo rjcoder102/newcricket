@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { FaLock } from 'react-icons/fa';
 import BetControlPanel from '../components/BetControlPanel';
 import { TEEN20_SIDE_BETS } from '../constants';
 import { getBetDetails } from '../utils/bettingUtils';
@@ -255,28 +256,30 @@ export const SectionHeader = memo(function SectionHeader({
   minMax,
   showBackLay = false,
 }) {
-  return (
-    <>
-      <div className='flex items-center justify-between rounded-tl-sm rounded-tr-sm bg-gradient-to-t from-[#243A48] to-[#2E4B5E] p-1 text-[12px] font-bold text-white'>
-        <div className='uppercase'>{title}</div>
-        {!showBackLay && <div>min/max: {minMax}</div>}
-      </div>
-      {showBackLay && (
-        <div className='flex w-full border-t border-gray-400 text-center text-black'>
-          <div className='w-[60%] px-2 py-1'>
-            <span className='inline-block rounded-sm bg-[#bed5d8] p-0.5 px-4 text-[10px] font-semibold lg:w-80'>
-              min/max: {minMax}
-            </span>
-          </div>
-          <div className='w-[20%] items-center justify-items-center bg-[#72bbef] text-[14px] font-bold'>
-            Back
-          </div>
-          <div className='w-[20%] items-center justify-items-center bg-[#f9c9d4] text-[14px] font-bold'>
-            Lay
-          </div>
+  if (showBackLay) {
+    return (
+      <div className='flex w-full items-stretch border-t border-[#c7c8ca] bg-[#ececec] text-black'>
+        <div className='flex w-[60%] flex-wrap items-center gap-x-2 px-2 py-1'>
+          <span className='text-[14px] font-bold uppercase'>{title}</span>
+          <span className='text-[11px] font-bold text-[#097c93]'>
+            Min/Max: {minMax}
+          </span>
         </div>
-      )}
-    </>
+        <div className='flex w-[20%] items-center justify-center bg-[#72bbef] text-[14px] font-bold text-[#333]'>
+          Back
+        </div>
+        <div className='flex w-[20%] items-center justify-center bg-[#faa9ba] text-[14px] font-bold text-[#333]'>
+          Lay
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className='flex items-center justify-between rounded-tl-sm rounded-tr-sm bg-gradient-to-t from-[#243A48] to-[#2E4B5E] p-1 text-[12px] font-bold text-white'>
+      <div className='uppercase'>{title}</div>
+      <div>min/max: {minMax}</div>
+    </div>
   );
 });
 
@@ -382,18 +385,26 @@ export const BetRow = memo(function BetRow({
   const isSelected = isCurrentlySelected || hasPendingBet;
   const amount = betAmount || 0;
 
+  const suspended = player.gstatus === 'SUSPENDED';
+  const backLocked = suspended || !(player.b > 0);
+  const layLocked = suspended || !(player.l > 0);
+
   const handleBetClick = (type, odds) => {
-    if (odds > 0) {
+    if (odds > 0 && !suspended) {
       setBetControl({ ...player, type, odds });
       setSelectedTeamSubtype(player.subtype);
       setValue(odds, player.nat, type);
     }
   };
 
+  const lockedCell = (
+    <FaLock className='mx-auto text-[14px] text-white/80' aria-label='Locked' />
+  );
+
   return (
-    <tr className='border-t border-gray-400 text-black'>
+    <tr className='border-t border-[#c7c8ca] bg-[#f7f7f7] text-[#333]'>
       {/* Player name + P/L */}
-      <td className='w-[60%] pl-2 text-[12px] font-bold uppercase'>
+      <td className='w-[60%] py-1 pl-2 text-[14px] font-bold'>
         {player.nat}
         <PLDisplay
           hasPendingBet={hasPendingBet}
@@ -411,29 +422,45 @@ export const BetRow = memo(function BetRow({
 
       {/* Back button */}
       <td
-        className={`w-[20%] cursor-pointer py-1 text-center text-[14px] font-bold ${
-          isCurrentlySelected && betControl?.type === 'back'
-            ? 'bg-[#1a8ee1] text-white shadow-[inset_0_1px_3px_#000000a8]'
-            : 'bg-[#72bbef]'
+        className={`w-[20%] py-1 text-center text-[14px] font-bold ${
+          backLocked
+            ? 'cursor-not-allowed bg-[#444]'
+            : isCurrentlySelected && betControl?.type === 'back'
+              ? 'cursor-pointer bg-[#1a8ee1] text-white shadow-[inset_0_1px_3px_#000000a8]'
+              : 'cursor-pointer bg-[#72bbef]'
         }`}
         onClick={() => handleBetClick('back', player.b)}
       >
-        <span className='block text-[12px] font-bold'>{player.b}</span>
-        <span className='block text-[11px] font-normal'>{player.bs}</span>
+        {backLocked ? (
+          lockedCell
+        ) : (
+          <>
+            <span className='block text-[15px] font-bold'>{player.b}</span>
+            <span className='block text-[11px] font-normal'>{player.bs}</span>
+          </>
+        )}
       </td>
 
       {/* Lay button */}
       {showLay ? (
         <td
-          className={`w-[20%] cursor-pointer py-1 text-center text-[14px] font-bold ${
-            isCurrentlySelected && betControl?.type === 'lay'
-              ? 'bg-[#f4496d] text-white shadow-[inset_0_1px_3px_#000000a8]'
-              : 'bg-[#f9c9d4]'
+          className={`w-[20%] py-1 text-center text-[14px] font-bold ${
+            layLocked
+              ? 'cursor-not-allowed bg-[#444]'
+              : isCurrentlySelected && betControl?.type === 'lay'
+                ? 'cursor-pointer bg-[#f4496d] text-white shadow-[inset_0_1px_3px_#000000a8]'
+                : 'cursor-pointer bg-[#faa9ba]'
           }`}
           onClick={() => handleBetClick('lay', player.l)}
         >
-          <span className='block text-[12px] font-bold'>{player.l}</span>
-          <span className='block text-[11px] font-normal'>{player.ls}</span>
+          {layLocked ? (
+            lockedCell
+          ) : (
+            <>
+              <span className='block text-[15px] font-bold'>{player.l}</span>
+              <span className='block text-[11px] font-normal'>{player.ls}</span>
+            </>
+          )}
         </td>
       ) : (
         <td className='w-[20%]'></td>
@@ -585,7 +612,7 @@ export const BetSection = memo(function BetSection({
             })}
           </div>
         )}
-        <SuspendedOverlay status={gstatus} />
+        {!withLay && <SuspendedOverlay status={gstatus} />}
         {children}
       </div>
     </div>
@@ -603,6 +630,8 @@ export const WithLayRenderer = memo(function WithLayRenderer({
   displayData,
   ...betProps
 }) {
+  const mainGroup = betProps.bettingData?.gtype || betProps.gameid;
+
   return (
     <>
       {Object.entries(displayData).map(([nat, team], index) => {
@@ -614,7 +643,7 @@ export const WithLayRenderer = memo(function WithLayRenderer({
         return (
           <BetSection
             key={`${nat}-${index}`}
-            title={nat}
+            title={nat === mainGroup ? 'Winner' : nat}
             minMax={sectionMinMax}
             players={team}
             gstatus={sectionStatus}

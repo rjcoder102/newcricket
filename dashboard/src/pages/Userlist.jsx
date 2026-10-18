@@ -1,28 +1,20 @@
 'use client';
-import {
-  CurrencyIcon,
-  ArrowSwapIcon,
-  MenuClockIcon,
-  GearIcon,
-  UserIcon,
-  BadgeLockIcon,
-  TrashBinIcon,
-} from '../assets/svgIcon';
 import { useEffect, useState } from 'react';
 import {
   FaBan,
   FaCheckCircle,
   FaEye,
   FaEyeSlash,
+  FaFileExcel,
+  FaFilePdf,
   FaLock,
   FaRegEdit,
   FaUnlock,
 } from 'react-icons/fa';
 import { useDispatch, useSelector } from 'react-redux';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion'; //eslint-disable-line
 import {
-  addAdmin,
   getAdmin,
   deleteSubAdmin,
   setCurrentPage,
@@ -46,6 +38,7 @@ import { updateGameLock } from '../redux/reducer/downlineReducer';
 export default function AgentLIst() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     userInfo,
     currentPage,
@@ -59,11 +52,10 @@ export default function AgentLIst() {
 
   const [entries, setEntries] = useState(10);
   const [creditEntries, setCreditEntries] = useState(10);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isEdit, setIsEdit] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(location.state?.search || '');
+  const [searchDraft, setSearchDraft] = useState(location.state?.search || '');
+  const [activeTab, setActiveTab] = useState('active');
   const [showPassword, setShowPassword] = useState(false);
-  const [showPassword2, setShowPassword2] = useState(false);
-  const [showPassword3, setShowPassword3] = useState(false);
   const [creditPopup, setCreditPopup] = useState(false);
   const [patnerPopup, setPatnerPopup] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -79,18 +71,6 @@ export default function AgentLIst() {
 
   const [type, setType] = useState('');
   const [selectedUserId, setSelectedUserId] = useState(null);
-  useEffect(() => {
-    if (isEdit) {
-      document.body.classList.add('modalOpen');
-    } else {
-      document.body.classList.remove('modalOpen');
-    }
-
-    // Cleanup function to remove class when component unmounts
-    return () => {
-      document.body.classList.remove('modalOpen');
-    };
-  }, [isEdit]);
 
   // const allowedRoles = roleHierarchy[userInfo?.role] || [];
 
@@ -143,34 +123,6 @@ export default function AgentLIst() {
   useEffect(() => {
     dispatch(getAdmin());
   }, [dispatch]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (formData.password !== formData.confirmPassword) {
-      toast.error('Password and Confirm Password do not match');
-      return;
-    }
-    if (userInfo) {
-      try {
-        const result = await dispatch(addAdmin(formData)).unwrap();
-        toast.success(result.message);
-        dispatch(
-          getAllOnlyUserAndDownline({
-            page: currentPage,
-            limit: entries,
-            searchQuery,
-          })
-        );
-        dispatch(getAdmin());
-        setIsEdit(false);
-      } catch (error) {
-        // console.log("root error", error);
-        toast.error(error);
-      }
-    } else {
-      navigate('/login');
-    }
-  };
 
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= totalPages) {
@@ -338,6 +290,122 @@ export default function AgentLIst() {
     window.location.reload();
   };
 
+  // Picks up the "All Client" search from the top bar when already on this page
+  useEffect(() => {
+    const incoming = location.state?.search;
+    if (incoming !== undefined) {
+      setSearchDraft(incoming);
+      setSearchQuery(incoming);
+    }
+  }, [location.state]);
+
+  const formatMoney = (v) => {
+    const num = Number(v);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  };
+
+  const handleLoad = () => setSearchQuery(searchDraft.trim());
+  const handleResetSearch = () => {
+    setSearchDraft('');
+    setSearchQuery('');
+  };
+
+  const visibleUsers = (onlyusers || []).filter((u) =>
+    activeTab === 'active' ? u.status === 'active' : u.status !== 'active'
+  );
+
+  const userPL = (u) =>
+    Number(u.bettingProfitLoss || 0) + Number(u.creditReferenceProfitLoss || 0);
+
+  const totals = visibleUsers.reduce(
+    (acc, u) => ({
+      credit: acc.credit + Number(u.creditReference || 0),
+      balance: acc.balance + Number(u.balance || 0),
+      pl: acc.pl + userPL(u),
+      avbalance: acc.avbalance + Number(u.avbalance || 0),
+    }),
+    { credit: 0, balance: 0, pl: 0, avbalance: 0 }
+  );
+
+  const isBettingAllowed = (u) =>
+    !(u.gamelock || []).some((g) => g.lock === false);
+
+  const exportRows = () => [
+    [
+      'User Name',
+      'CR',
+      'Balance',
+      'Client(P/L)',
+      'Exposure',
+      'Available Balance',
+      'U st',
+      'B st',
+      'Exposure Limit',
+      'Default(%)',
+      'Account Type',
+    ],
+    ...visibleUsers.map((u) => [
+      u.userName,
+      u.creditReference || 0,
+      u.balance || 0,
+      userPL(u),
+      u.exposure || 0,
+      u.avbalance || 0,
+      u.status === 'active' ? 'Yes' : 'No',
+      isBettingAllowed(u) ? 'Yes' : 'No',
+      u.exposureLimit || 0,
+      u.commition || 0,
+      u.role,
+    ]),
+  ];
+
+  const handleExportExcel = () => {
+    const csv = exportRows()
+      .map((row) =>
+        row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')
+      )
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'account-list.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = () => {
+    const escapeHtml = (s) =>
+      String(s ?? '').replace(
+        /[&<>"]/g,
+        (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
+      );
+    const [head, ...body] = exportRows();
+    const html = `<html><head><title>Account List</title><style>
+      body{font-family:Arial,sans-serif;font-size:12px}
+      table{border-collapse:collapse;width:100%}
+      th,td{border:1px solid #999;padding:4px 6px;text-align:left}
+      th{background:#eee}
+    </style></head><body><h3>Account List</h3><table>
+      <thead><tr>${head.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${body
+        .map(
+          (r) =>
+            `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`
+        )
+        .join('')}</tbody></table></body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) {
+      toast.error('Please allow pop-ups to export PDF');
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   const downlineBettingPL = userInfo?.uplineBettingProfitLoss || 0;
   const creditRefPL = userInfo?.creditReferenceProfitLoss || 0;
   const totalUplinePL = downlineBettingPL + creditRefPL;
@@ -354,8 +422,12 @@ export default function AgentLIst() {
   return (
     <>
       <Navbar />
-      <div className='min-h-screen p-1 px-[15px] md:px-7.5'>
-        <div className='my-[13px] flex flex-wrap justify-end gap-2'>
+      <div className='min-h-screen bg-[#f1f1f1] p-1 px-[15px] md:px-4'>
+        <div className='my-[13px] flex flex-wrap items-center justify-between gap-2'>
+          <h1 className='text-[20px] leading-tight font-medium text-[#222]'>
+            Account List
+          </h1>
+          <div className='flex flex-wrap items-center gap-2'>
           <div className='flex items-center space-x-2'>
             <div className='flex items-center text-[12px] font-semibold md:text-[15px] md:font-bold'>
               Chips Summary
@@ -384,19 +456,10 @@ export default function AgentLIst() {
 
           <div className='flex items-center space-x-2'>
             <button
-              className='flex items-center gap-1 rounded border border-gray-300 bg-white px-[15px] text-[12px] leading-[30px] font-bold'
-              onClick={() => setIsEdit(true)}
+              className='rounded-[3px] bg-[#0b8bd9] px-[14px] py-[7px] text-[12px] leading-none font-bold text-white hover:bg-[#0976b9]'
+              onClick={() => navigate('/add-account')}
             >
-              <svg
-                xmlns='http://www.w3.org/2000/svg'
-                className='h-5 w-5'
-                viewBox='0 0 20 20'
-                fill='currentColor'
-              >
-                <path d='M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6z' />
-                <path d='M16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z' />
-              </svg>
-              Add User
+              Add Account
             </button>
             <button
               className='flex h-full w-[30px] items-center justify-center rounded border border-gray-300 bg-white leading-[30px] text-gray-500'
@@ -415,6 +478,7 @@ export default function AgentLIst() {
                 />
               </svg>
             </button>
+          </div>
           </div>
         </div>
 
@@ -493,13 +557,13 @@ export default function AgentLIst() {
           </div>
         </div>
         {/* Main content area with table */}
-        <div className='rounded border border-gray-300 bg-white p-5'>
+        <div className='rounded-[3px] bg-white p-4 shadow-sm'>
           {/* Table controls */}
-          <div className='mb-4 flex flex-col justify-between text-[13px] md:flex-row'>
-            <div className='mb-2 flex items-center justify-center text-[#333] md:mb-0'>
+          <div className='mb-3 flex flex-col justify-between gap-2 text-[12px] font-bold text-[#222] md:flex-row md:items-start'>
+            <div className='flex items-center'>
               <span className='mr-2'>Show</span>
               <select
-                className='rounded border border-gray-300 px-2 py-1'
+                className='rounded border border-gray-300 px-1 py-[2px] text-[11px]'
                 value={entries}
                 onChange={(e) => setEntries(Number(e.target.value))}
               >
@@ -511,80 +575,148 @@ export default function AgentLIst() {
               </select>
               <span className='ml-2'>entries</span>
             </div>
-            <div className='flex items-center justify-center'>
-              <span className='mr-2'>Search</span>
+            <div className='flex items-center gap-2'>
+              <span>Search:</span>
               <input
                 type='text'
-                className='rounded border border-gray-300 px-2 py-1'
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder='Search...'
+                className='w-[150px] rounded border border-gray-300 px-2 py-[5px] text-[12px] font-normal outline-none'
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLoad()}
               />
+              <button
+                type='button'
+                onClick={handleLoad}
+                className='rounded-[3px] bg-[#0b8bd9] px-3 py-[6px] text-[12px] leading-none font-bold text-white hover:bg-[#0976b9]'
+              >
+                Load
+              </button>
+              <button
+                type='button'
+                onClick={handleResetSearch}
+                className='rounded-[3px] bg-[#6c757d] px-3 py-[6px] text-[12px] leading-none font-bold text-white hover:bg-[#5a6268]'
+              >
+                Reset
+              </button>
             </div>
           </div>
 
+          {/* Tabs */}
+          <div className='mb-3 flex border-b border-gray-300 text-[13px]'>
+            {[
+              { key: 'active', label: 'Active Users' },
+              { key: 'deactive', label: 'Deactive Users' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type='button'
+                onClick={() => setActiveTab(tab.key)}
+                className={`-mb-px px-4 py-2 ${
+                  activeTab === tab.key
+                    ? 'rounded-t border border-gray-300 border-b-white bg-white text-[#333]'
+                    : 'text-[#0b60a8]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Export */}
+          <div className='mb-3 flex gap-2'>
+            <button
+              type='button'
+              onClick={handleExportPdf}
+              className='btn-pdf flex items-center gap-1 rounded-[3px] px-3 py-[6px] text-[12px] leading-none font-bold text-white shadow'
+            >
+              <FaFilePdf /> PDF
+            </button>
+            <button
+              type='button'
+              onClick={handleExportExcel}
+              className='btn-excel flex items-center gap-1 rounded-[3px] px-3 py-[6px] text-[12px] leading-none font-bold text-white shadow'
+            >
+              <FaFileExcel /> Excel
+            </button>
+          </div>
+
           {/* Table */}
-          <div className='overflow-x-auto text-[13px]'>
+          <div className='overflow-x-auto text-[12px]'>
             <table className='w-full border-collapse'>
               <thead>
-                <tr className='bg-[#e0e6e6] whitespace-nowrap text-black'>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Username
+                <tr className='whitespace-nowrap text-[#333]'>
+                  <th className='px-2 py-2 text-left font-bold'>User Name</th>
+                  <th className='px-2 py-2 text-center font-bold'>CR</th>
+                  <th className='px-2 py-2 text-center font-bold'>Balance</th>
+                  <th className='px-2 py-2 text-center font-bold'>
+                    Client(P/L)
                   </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Credit Ref.
+                  <th className='px-2 py-2 text-center font-bold'>Exposure</th>
+                  <th className='px-2 py-2 text-center font-bold'>
+                    Available Balance
                   </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Balance
-                  </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Exposure
-                  </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
+                  <th className='px-2 py-2 text-center font-bold'>U st</th>
+                  <th className='px-2 py-2 text-center font-bold'>B st</th>
+                  <th className='px-2 py-2 text-center font-bold'>
                     Exposure Limit
                   </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Avail. Bal.
+                  <th className='px-2 py-2 text-center font-bold'>
+                    Default(%)
                   </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Ref. P/L
+                  <th className='px-2 py-2 text-center font-bold'>
+                    Account Type
                   </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Status
-                  </th>
-                  <th className='border border-gray-300 px-[10px] py-[9px] text-left'>
-                    Actions
-                  </th>
+                  <th className='px-2 py-2 text-left font-bold'>Action</th>
+                </tr>
+                <tr className='border-y-2 border-[#999] bg-[#e4e4e4] font-bold'>
+                  <td className='px-2 py-[5px]'></td>
+                  <td className='px-2 py-[5px] text-center'>
+                    {formatMoney(totals.credit)}
+                  </td>
+                  <td className='px-2 py-[5px] text-center'>
+                    {formatMoney(totals.balance)}
+                  </td>
+                  <td className='px-2 py-[5px] text-center'>
+                    {formatMoney(totals.pl)}
+                  </td>
+                  <td className='px-2 py-[5px]'></td>
+                  <td className='px-2 py-[5px] text-center'>
+                    {formatMoney(totals.avbalance)}
+                  </td>
+                  <td colSpan='6'></td>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan='9'>
+                    <td colSpan='12'>
                       <div className='flex w-full justify-center'>
                         <Loader />
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  onlyusers.map((user) => (
-                    <tr key={user._id} className='font-bold hover:bg-gray-100'>
+                  visibleUsers.map((user, index) => (
+                    <tr
+                      key={user._id}
+                      className={`font-bold hover:bg-[#dfeaf3] ${
+                        index % 2 ? 'bg-[#efefef]' : 'bg-white'
+                      }`}
+                    >
                       <td
                         // onClick={() => handleLoadNextLevel(user.code)}
-                        className='cursor-pointer border border-gray-300 px-[10px] py-[9px]'
+                        className='cursor-pointer border border-gray-200 px-2 py-[5px]'
                       >
-                        <div className='flex items-center gap-1 lowercase'>
-                          {' '}
-                          <span className='inline-block h-fit rounded-sm border border-[#4dbd74] bg-[#4dbd74] px-1 py-0.5 text-[11px] leading-none text-white uppercase'>
-                            {user.role}
-                          </span>
+                        <span className='inline-block rounded-[3px] bg-[#3a3f44] px-3 py-1 text-[12px] leading-none font-bold text-white'>
                           {user.userName}
-                        </div>
+                        </span>
                       </td>
-                      <td className='border border-gray-300 px-[10px] py-[9px]'>
-                        <div className='flex items-center gap-x-2'>
-                          {formatNumber(user.creditReference)}
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        <div className='flex items-center justify-center gap-x-2'>
+                          {formatMoney(user.creditReference)}
                           <span
-                            className='text-blue2'
+                            className='cursor-pointer text-blue2'
                             onClick={() => {
                               setCreditPopup(true);
                               setcurrentUser(user);
@@ -593,7 +725,7 @@ export default function AgentLIst() {
                             <FaRegEdit />
                           </span>
                           <span
-                            className='text-blue2'
+                            className='cursor-pointer text-blue2'
                             onClick={() => {
                               handleCreditRefHistory(user._id);
                               setcurrentUser(user);
@@ -603,22 +735,68 @@ export default function AgentLIst() {
                           </span>
                         </div>
                       </td>
-                      <td className='border border-gray-300 px-[10px] py-[9px]'>
-                        <div className='flex items-center gap-x-2'>
-                          <span>{formatNumber(user.balance || 0)}</span>
-                        </div>
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        {formatMoney(user.balance || 0)}
                       </td>
                       <td
-                        className={`border border-gray-300 px-[10px] py-[9px] text-red-500`}
+                        className={`border border-gray-200 px-2 py-[5px] text-center ${
+                          userPL(user) < 0 ? 'text-red-500' : 'text-green-600'
+                        }`}
                       >
-                        ({formatNumber(user.exposure)})
+                        {formatMoney(userPL(user))}
                       </td>
-                      <td className='border border-gray-300 px-[10px] py-[9px]'>
-                        <div className='flex items-center gap-1'>
-                          {formatNumber(user?.exposureLimit || 0)}
+                      <td className='border border-gray-200 px-2 py-[5px] text-center text-red-500'>
+                        ({formatMoney(Math.abs(Number(user.exposure || 0)))})
+                      </td>
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        {/* BALANCE AND AVBALANCE HAS TO BE SAME  */}
+                        {formatMoney(user.avbalance || 0)}
+                      </td>
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        <span
+                          title={user.status}
+                          onClick={() => {
+                            if (isFetchingAllUsers == true) {
+                              setSettingPopup(true);
+                              setcurrentUser(user);
+                            }
+                          }}
+                          className={`inline-flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded-[3px] text-[11px] text-white ${
+                            user.status === 'active'
+                              ? 'bg-black'
+                              : 'border border-gray-400 bg-white'
+                          }`}
+                        >
+                          {user.status === 'active' ? <IoMdCheckmark /> : null}
+                        </span>
+                      </td>
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        <span
+                          title={
+                            isBettingAllowed(user)
+                              ? 'Betting allowed'
+                              : 'Betting locked on some sports'
+                          }
+                          onClick={() => {
+                            setSportsPopup(true);
+                            setGameLockData(user?.gamelock);
+                            setcurrentUser(user);
+                          }}
+                          className={`inline-flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded-[3px] text-[11px] text-white ${
+                            isBettingAllowed(user)
+                              ? 'bg-black'
+                              : 'border border-gray-400 bg-white'
+                          }`}
+                        >
+                          {isBettingAllowed(user) ? <IoMdCheckmark /> : null}
+                        </span>
+                      </td>
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        <div className='flex items-center justify-center gap-1'>
+                          {formatMoney(user?.exposureLimit || 0)}
                           {isFetchingAllUsers == true ? (
                             <span
-                              className='text-blue2'
+                              className='cursor-pointer text-blue2'
                               onClick={() => {
                                 setPatnerPopup(true);
                                 setcurrentUser(user);
@@ -629,117 +807,85 @@ export default function AgentLIst() {
                           ) : null}
                         </div>
                       </td>
-
-                      <td className='border border-gray-300 px-[10px] py-[9px]'>
-                        {/* BALANCE AND AVBALANCE HAS TO BE SAME  */}
-                        {formatNumber(user.avbalance || 0)}
+                      <td className='border border-gray-200 px-2 py-[5px] text-center'>
+                        {user.commition || 0}
                       </td>
-                      <td
-                        className={`border border-gray-300 px-[10px] py-[9px] ${
-                          user.creditReferenceProfitLoss +
-                            user.bettingProfitLoss <
-                          0
-                            ? 'text-red-500'
-                            : 'text-green-500'
-                        }`}
-                      >
-                        {formatNumber(
-                          Number(user.bettingProfitLoss) +
-                            Number(user.creditReferenceProfitLoss)
-                        )}
+                      <td className='border border-gray-200 px-2 py-[5px] text-center font-normal capitalize'>
+                        {user.role}
                       </td>
-                      <td className='border border-gray-300 px-[10px] py-[9px] text-[12px]'>
-                        <span
-                          className={`rounded-sm border px-[5px] py-[3px] text-[11px] ${
-                            user.status === 'active'
-                              ? 'border-[#bedca7] bg-[#e5f1dc] text-[#508d0e]'
-                              : ''
-                          } ${
-                            user.status === 'suspend'
-                              ? 'border-red-200 bg-red-100 text-red-700'
-                              : ''
-                          } ${
-                            user.status === 'locked'
-                              ? 'border-gray-300 bg-gray-200 text-gray-800'
-                              : ''
-                          } `}
-                        >
-                          {user.status}
-                        </span>
-                      </td>
-                      <td className='border border-gray-300 px-[10px] py-[9px]'>
-                        <div className='flex items-center'>
+                      <td className='border border-gray-200 px-2 py-[5px]'>
+                        <div className='flex items-center gap-1'>
                           {isFetchingAllUsers == true ? (
                             <>
                               <span
+                                title='Deposit / Withdraw'
                                 onClick={() => {
                                   setBalancePopup(true);
                                   setcurrentUser(user);
                                 }}
-                                className='flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3] md:ml-[12px]'
+                                className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
                               >
-                                <CurrencyIcon />
+                                D
                               </span>
-
-                              <div
+                              <span
+                                title='Profit / Loss'
                                 onClick={() =>
                                   navigate(`/online-user/${user._id}`, {
                                     state: { activeTab: 'PL' },
                                   })
                                 }
-                                className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'
+                                className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
                               >
-                                <span>
-                                  <ArrowSwapIcon />
-                                </span>
-                              </div>
-
-                              <div
+                                P
+                              </span>
+                              <span
+                                title='Bet History'
                                 onClick={() =>
                                   navigate(`/online-user/${user._id}`, {
                                     state: { activeTab: 'BH' },
                                   })
                                 }
-                                className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'
+                                className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
                               >
-                                <span>
-                                  <MenuClockIcon />
-                                </span>
-                              </div>
+                                B
+                              </span>
                               <span
+                                title='Settings'
                                 onClick={() => {
                                   setSettingPopup(true);
                                   setcurrentUser(user);
                                 }}
-                                className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'
+                                className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
                               >
-                                <GearIcon />
+                                S
                               </span>
                             </>
                           ) : null}
-                          <div className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'>
-                            <Link to={`/online-user/${user._id}`} className=''>
-                              <span>
-                                <UserIcon />
-                              </span>
-                            </Link>
-                          </div>
+                          <Link
+                            to={`/online-user/${user._id}`}
+                            title='Profile'
+                            className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
+                          >
+                            U
+                          </Link>
                           <span
+                            title='Sports Lock'
                             onClick={() => {
                               setSportsPopup(true);
                               setGameLockData(user?.gamelock);
                               setcurrentUser(user);
                             }}
-                            className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'
+                            className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[11px] font-bold text-white hover:bg-black'
                           >
-                            <BadgeLockIcon />
+                            L
                           </span>
                           {isFetchingAllUsers == true ? (
                             <span
-                              className='ml-[12px] flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-sm border border-[#bbbbbb] bg-[#f3f3f3] text-[#3c3c3ce3]'
+                              title='Delete'
+                              className='flex h-[22px] w-[24px] cursor-pointer items-center justify-center rounded-[3px] bg-[#3a3f44] text-[13px] text-white hover:bg-red-700'
                               onClick={() => handleDelete(user._id)}
                             >
-                              <TrashBinIcon />
+                              <MdDelete />
                             </span>
                           ) : null}
                         </div>
@@ -752,308 +898,60 @@ export default function AgentLIst() {
           </div>
 
           {/* Pagination */}
-          <div className='mt-4 flex flex-col justify-between gap-3 text-[13px] md:flex-row md:items-center'>
+          <div className='mt-4 flex flex-col justify-between gap-3 text-[12px] md:flex-row md:items-center'>
             <div>
               Showing {currentPage} to {totalPages} of {onlyusers?.length}{' '}
               entries
             </div>
-            <div className='flex flex-wrap'>
-              {/* First Button */}
+            <div className='flex flex-wrap items-center gap-[2px]'>
               <button
-                className='pgBtn px-[13px] py-[6.5px]'
+                className='h-[28px] w-[30px] rounded-[3px] bg-[#f3f3f3] text-[#aaa] enabled:text-[#0b60a8]'
                 onClick={() => handlePageChange(1)}
                 disabled={currentPage === 1}
+                title='First'
               >
-                First
+                «
               </button>
-
-              {/* Previous Button */}
               <button
-                className='pgBtn ml-[2px] px-[13px] py-[6.5px]'
+                className='h-[28px] w-[30px] rounded-[3px] bg-[#f3f3f3] text-[#aaa] enabled:text-[#0b60a8]'
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
+                title='Previous'
               >
-                Previous
+                ‹
               </button>
-
-              {/* Page Numbers */}
               {[...Array(totalPages)].map((_, i) => (
                 <button
                   key={i}
-                  className={`ml-[2px] rounded-[2px] border border-gray-400 px-[13px] py-[6.5px] leading-none ${
-                    currentPage === i + 1 ? 'bg-gray-200' : 'pgBtn'
+                  className={`h-[28px] min-w-[30px] rounded-[3px] px-2 ${
+                    currentPage === i + 1
+                      ? 'bg-[#0b8bd9] text-white'
+                      : 'bg-[#f3f3f3] text-[#0b60a8]'
                   }`}
                   onClick={() => handlePageChange(i + 1)}
                 >
                   {i + 1}
                 </button>
               ))}
-
-              {/* Next Button */}
               <button
-                className='pgBtn ml-[2px] px-[13px] py-[6.5px]'
+                className='h-[28px] w-[30px] rounded-[3px] bg-[#f3f3f3] text-[#aaa] enabled:text-[#0b60a8]'
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
+                title='Next'
               >
-                Next
+                ›
               </button>
-
-              {/* Last Button */}
               <button
-                className='pgBtn ml-[2px] px-[13px] py-[6.5px]'
+                className='h-[28px] w-[30px] rounded-[3px] bg-[#f3f3f3] text-[#aaa] enabled:text-[#0b60a8]'
                 onClick={() => handlePageChange(totalPages)}
                 disabled={currentPage === totalPages}
+                title='Last'
               >
-                Last
+                »
               </button>
             </div>
           </div>
         </div>
-        {isEdit && (
-          <div className='fixed inset-0 z-10 flex items-center justify-center overflow-y-auto bg-[#00000074] p-2 md:p-4'>
-            <div className='absolute top-0 w-full max-w-[500px]'>
-              <div className='my-[28px]'>
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
-                  transition={{ duration: 0.4 }}
-                  className='rounded-lg bg-white shadow-lg'
-                >
-                  {/* Header */}
-                  <div className='bg-blue flex justify-between rounded-t-lg px-[7px] py-[5px] font-bold text-white'>
-                    <span className='text-[15px]'>Add User</span>
-                    <button
-                      onClick={() => setIsEdit(false)}
-                      className='text-[21px] leading-none text-white'
-                    >
-                      ×
-                    </button>
-                  </div>
-
-                  {/* Commission List */}
-                  <form
-                    onSubmit={handleSubmit}
-                    className='py-3 font-semibold md:p-4'
-                  >
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Username <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='text'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) =>
-                          setFormData({ ...formData, userName: e.target.value })
-                        }
-                        value={formData.userName}
-                        placeholder='Add here'
-                      />
-                    </div>
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Name <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='text'
-                        onChange={(e) =>
-                          setFormData({ ...formData, name: e.target.value })
-                        }
-                        value={formData.name}
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        placeholder='Add here'
-                      />
-                    </div>
-
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Commission(%) <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='text'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            commition: e.target.value,
-                          })
-                        }
-                        value={formData.commition}
-                        placeholder='Add here'
-                      />
-                    </div>
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Opening Balance <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='number'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) => {
-                          const openingValue = e.target.value;
-                          if (openingValue.includes('.')) {
-                            toast.error('The bank balance must be an integer');
-                            return;
-                          }
-                          setFormData({ ...formData, balance: openingValue });
-                        }}
-                        value={formData.balance}
-                        placeholder='Add here'
-                      />
-                    </div>
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Exposure limit <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='number'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) => {
-                          const exposureValue = e.target.value;
-                          if (exposureValue.includes('.')) {
-                            return;
-                          }
-                          setFormData({
-                            ...formData,
-                            exposureLimit: exposureValue,
-                          });
-                        }}
-                        value={formData.exposureLimit}
-                        placeholder='Add here'
-                      />
-                    </div>
-
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Credit Reference <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='number'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) => {
-                          const crRefValue = e.target.value;
-                          let roundedValue = crRefValue;
-                          if (crRefValue.includes('.')) {
-                            roundedValue = Math.round(
-                              parseFloat(crRefValue)
-                            ).toString();
-                          }
-                          setFormData({
-                            ...formData,
-                            creditReference: roundedValue,
-                          });
-                        }}
-                        value={formData.creditReference}
-                        placeholder='Add here'
-                      />
-                    </div>
-
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Mobile Number <span className='text-red-500'>*</span>
-                      </span>
-                      <input
-                        type='text'
-                        className='col-span-2 mt-1 w-full basis-full rounded-md border border-gray-300 px-1.5 py-2.5 text-xs font-light md:basis-[75%] md:py-1 md:text-sm'
-                        onChange={(e) =>
-                          setFormData({ ...formData, phone: e.target.value })
-                        }
-                        value={formData.phone}
-                        placeholder='Add here'
-                      />
-                    </div>
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Password<span className='text-red-500'>*</span>
-                      </span>
-                      <span className='relative w-full basis-full font-light md:basis-[75%]'>
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          placeholder='Enter your password...'
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              password: e.target.value,
-                            })
-                          }
-                          value={formData.password}
-                          className='mt-1 w-full rounded border border-gray-300 px-1.5 py-2.5 pr-10 text-xs md:text-sm'
-                        />
-                        <button
-                          type='button'
-                          className='absolute inset-y-0 right-3 flex items-center text-gray-500'
-                          onClick={() => setShowPassword(!showPassword)}
-                        >
-                          {showPassword ? <FaEyeSlash /> : <FaEye />}
-                        </button>
-                      </span>
-                    </div>
-
-                    <div className='flex flex-col items-center px-4 py-1 md:flex-row'>
-                      <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                        Confirm Password <span className='text-red-500'>*</span>
-                      </span>
-                      <span className='relative w-full basis-full font-light md:basis-[75%]'>
-                        <input
-                          type={showPassword2 ? 'text' : 'password'}
-                          value={formData.confirmPassword}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              confirmPassword: e.target.value,
-                            })
-                          }
-                          placeholder='Enter your password...'
-                          className='mt-1 w-full rounded border border-gray-300 px-1.5 py-2.5 pr-10 text-xs md:text-sm'
-                        />
-                        <button
-                          type='button'
-                          className='absolute inset-y-0 right-3 flex items-center text-gray-500'
-                          onClick={() => setShowPassword2(!showPassword2)}
-                        >
-                          {showPassword2 ? <FaEyeSlash /> : <FaEye />}
-                        </button>
-                      </span>
-                    </div>
-                    <div className='flex flex-col items-center justify-center'>
-                      <div className='flex w-full flex-col items-center px-4 py-1 md:flex-row'>
-                        <span className='basis-full text-center text-[12px] md:basis-[35%] md:text-left'>
-                          Master Password{' '}
-                          <span className='text-red-500'>*</span>
-                        </span>
-                        <span className='relative w-full basis-full font-light md:basis-[75%]'>
-                          <input
-                            type={showPassword3 ? 'text' : 'password'}
-                            onChange={(e) =>
-                              setFormData({
-                                ...formData,
-                                masterPassword: e.target.value,
-                              })
-                            }
-                            value={formData.masterPassword}
-                            placeholder='Enter your password...'
-                            className='mt-1 w-full rounded border border-gray-300 px-1.5 py-2.5 pr-10 text-xs md:text-sm'
-                          />
-                          <button
-                            type='button'
-                            className='absolute inset-y-0 right-3 flex items-center text-gray-500'
-                            onClick={() => setShowPassword3(!showPassword3)}
-                          >
-                            {showPassword3 ? <FaEyeSlash /> : <FaEye />}
-                          </button>
-                        </span>
-                      </div>
-
-                      <button className='bg-blue mt-[16px] w-[140px] rounded-md px-[10px] py-[5px] text-[14px] text-white'>
-                        Create
-                      </button>
-                    </div>
-                  </form>
-                </motion.div>
-              </div>
-            </div>
-          </div>
-        )}
         {creditPopup && (
           <div className='fixed inset-0 z-20 flex h-full w-full items-center justify-center bg-[#00000074] text-[13px]'>
             <motion.div
