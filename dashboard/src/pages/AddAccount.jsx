@@ -157,7 +157,7 @@ export default function AddAccount({ mode = 'user' }) {
             <div>
               <SectionTitle>Personal Detail</SectionTitle>
               <div className='mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2'>
-                <Field label='Client Name:'>
+                <Field label='Client Name (User Name):'>
                   <input
                     type='text'
                     className={inputClass}
@@ -365,9 +365,9 @@ export default function AddAccount({ mode = 'user' }) {
 
           <div className='mt-6 flex flex-col items-end gap-3'>
             <div className='w-full md:w-[30%]'>
-              <Field label='Transaction Password:'>
+              <Field label='Master Password:'>
                 <PasswordInput
-                  placeholder='Transaction Password'
+                  placeholder='Master Password'
                   value={formData.masterPassword}
                   onChange={(e) =>
                     setFormData({ ...formData, masterPassword: e.target.value })

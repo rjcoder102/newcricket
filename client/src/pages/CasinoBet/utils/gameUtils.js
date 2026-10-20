@@ -1,5 +1,6 @@
 import { TWO_PLAYER_GAMES } from '../constants';
-
+// https://dstream.nautical7.com/casino-cricket-stream/:gmid?key=tvk_Nlz_0My2Hc2SXS3sqZPNqJTOrt-qyiWy
+// https://dstream.nautical7.com/casino-stream/:eventName?key=tvk_Nlz_0My2Hc2SXS3sqZPNqJTOrt-qyiWy
 /**
  * Check if game should show only two players
  */
@@ -79,5 +80,5 @@ const CASINO_TV_KEY =
  */
 export const getVideoStreamUrl = (gameid) => {
   if (!gameid) return '';
-  return `${CASINO_TV_BASE_URL}/casino-tv?gmid=${gameid}&key=${CASINO_TV_KEY}`;
+  return `${CASINO_TV_BASE_URL}/casino-stream/${gameid}?key=${CASINO_TV_KEY}`;
 };

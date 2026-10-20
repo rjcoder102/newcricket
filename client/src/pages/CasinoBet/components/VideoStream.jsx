@@ -20,6 +20,9 @@ const VideoStream = memo(function VideoStream({
     setShowRules(false);
   }, [gameid]);
 
+  // console.log('Video stream casino game ID:', gameid);
+  // console.log('Video stream URL:', getVideoStreamUrl(gameid));
+
   // Video load timeout
   useEffect(() => {
     const timeout = setTimeout(() => {

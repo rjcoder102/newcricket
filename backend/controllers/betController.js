@@ -359,13 +359,47 @@ const placeCasinoBet = async (req, res) => {
         .json({ message: "Bet type must be 'back' or 'lay'" });
     }
 
-    // Server-side market validation: check suspend status against live data
-    const casinoCheck = await validateCasinoMarket(
+    // The live-odds check (shared provider cache) and every read this bet needs are
+    // independent, so they run together instead of one after the other.
+    const uniqueKey = {
       gameId,
-      teamName,
-      xValue,
-      otype
-    );
+      roundId,
+      marketName: 'WINNER',
+      userId: id,
+      status: 0,
+    };
+    // Exclude cashed-out bets — they are locked and must not be merged/offset
+    const roundBetsFilter = {
+      userId: id,
+      roundId,
+      gameId,
+      marketName: 'WINNER',
+      status: 0,
+      isCashedOut: { $ne: true },
+    };
+    const [
+      casinoCheck,
+      user,
+      existingExact,
+      existingBet,
+      marketBets,
+      pendingBets,
+    ] = await Promise.all([
+      validateCasinoMarket(gameId, teamName, xValue, otype),
+      // Plain objects with only the fields this bet uses: building full Mongoose
+      // documents (with their quick-stake / game-lock arrays) was the main CPU cost.
+      SubAdmin.findById(id)
+        .select(
+          'userName role invite gamelock balance avbalance exposure exposureLimit'
+        )
+        .lean(),
+      betModel.findOne(uniqueKey).select('market_id').lean(),
+      // existingBet is changed and saved below, so it stays a document
+      betModel.findOne({ ...roundBetsFilter, betType: 'casino' }),
+      betModel.find(roundBetsFilter).lean(),
+      betModel.find({ userId: id, status: 0 }).lean(),
+    ]);
+
     if (!casinoCheck.valid) {
       console.warn(
         `[BET REJECTED] Casino: gameId=${gameId} roundId=${roundId} team=${teamName} reason="${casinoCheck.reason}"`
@@ -373,10 +407,11 @@ const placeCasinoBet = async (req, res) => {
       return res.status(400).json({ message: casinoCheck.reason });
     }
 
-    const user = await SubAdmin.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+    // The model rounds balance to 2 decimals when read; keep that for plain objects
+    user.balance = parseFloat(Number(user.balance || 0).toFixed(2));
 
     // Check if Casino is locked for this user
     const casinoLockEntry = user.gamelock?.find(
@@ -389,15 +424,6 @@ const placeCasinoBet = async (req, res) => {
     }
 
     // Market ID logic
-    const uniqueKey = {
-      gameId,
-      roundId,
-      marketName: 'WINNER',
-      userId: id,
-      status: 0,
-    };
-    const existingExact = await betModel.findOne(uniqueKey);
-
     let market_id;
     if (existingExact) {
       market_id = existingExact.market_id;
@@ -449,28 +475,8 @@ const placeCasinoBet = async (req, res) => {
     betAmount = parseFloat(betAmount.toFixed(2));
     p = parseFloat(p.toFixed(2));
 
-    // STEP 1: Check for existing casino bet FIRST (before balance check)
-    // Exclude cashed-out bets — they are locked and must not be merged/offset
-    const existingBet = await betModel.findOne({
-      userId: id,
-      roundId,
-      gameId,
-      marketName: 'WINNER',
-      betType: 'casino',
-      status: 0,
-      isCashedOut: { $ne: true },
-    });
-
-    // STEP 2: Calculate effective available balance using scenario-based logic (all bets in this round)
-    // Exclude cashed-out bets — their exposure is handled separately
-    const marketBets = await betModel.find({
-      userId: id,
-      roundId,
-      gameId,
-      marketName: 'WINNER',
-      status: 0,
-      isCashedOut: { $ne: true },
-    });
+    // STEP 1/2: the existing casino bet and this round's bets were loaded above,
+    // together with the validation and user reads.
 
     // Calculate effective balance based on market position
     // Using new method that includes potential profit from the new bet itself
@@ -503,10 +509,6 @@ const placeCasinoBet = async (req, res) => {
     }
 
     // STEP 4: Exposure limit check using scenario-based simulation
-    const pendingBets = await betModel.find({
-      userId: id,
-      status: 0,
-    });
     const simulatedNewBet = {
       gameType: 'Casino',
       betType: 'casino',
@@ -521,7 +523,6 @@ const placeCasinoBet = async (req, res) => {
       ...pendingBets,
       simulatedNewBet,
     ]);
-    console.log('project exposure is: ', projectedExposure);
     if (projectedExposure > user.exposureLimit) {
       return res.status(400).json({ message: 'Exposure limit exceeded' });
     }
@@ -632,9 +633,6 @@ const placeCasinoBet = async (req, res) => {
                 (betAmount - originalPrice).toFixed(2)
               );
               existingBet.otype = otype;
-              console.log(
-                'The offeset is happening partial offset back and then lay '
-              );
               user.skipExposureRecalculation = true;
 
               user.avbalance = parseFloat(
@@ -670,10 +668,6 @@ const placeCasinoBet = async (req, res) => {
           user.avbalance = parseFloat((user.avbalance - p).toFixed(2));
         } else {
           // Teen Patti / other: matching sports logic (offset / switch / add)
-          console.log(
-            '\n\x1b[43m\x1b[30m ===== PROCESSING DIFFERENT TEAM ===== \x1b[0m'
-          );
-
           if (otype === existingBet.otype) {
             if (originalPrice >= betAmount) {
               existingBet.price = parseFloat(
@@ -749,31 +743,22 @@ const placeCasinoBet = async (req, res) => {
         betType: 'casino',
         subtype,
       });
-      console.log('New Bet is created', newBet);
       user.avbalance = parseFloat((user.avbalance - p).toFixed(2));
     }
 
-    // Database operations
-    const saveOperations = [];
+    // Exposure after this bet, from the bets loaded above plus the change just made.
+    // This is the same data the old post-save re-query returned, without the extra
+    // round trip, and it lets a failed safety check stop everything before any write.
+    const updatedPendingBets = pendingBets.map((b) =>
+      existingBet && String(b._id) === String(existingBet._id) ? existingBet : b
+    );
+    if (newBet) updatedPendingBets.push(newBet);
 
-    if (existingBet) {
-      saveOperations.push(existingBet.save());
-    }
+    // Set by the offset branches above
+    const recalcAfterOffset = user.skipExposureRecalculation;
+    user.skipExposureRecalculation = false;
 
-    if (newBet) {
-      saveOperations.push(newBet.save());
-    }
-
-    saveOperations.push(user.save());
-    await Promise.all(saveOperations);
-
-    //Recalculate exposure from updated bets
-    if (!user.skipExposureRecalculation) {
-      const updatedPendingBets = await betModel.find({
-        userId: id,
-        status: 0,
-      });
-
+    if (!recalcAfterOffset) {
       // Only apply casino exposure logic if there are casino bets
       // Don't override fancy betting exposure calculation
       const hasCasinoBets = updatedPendingBets.some(
@@ -784,35 +769,18 @@ const placeCasinoBet = async (req, res) => {
         // Use scenario-based exposure calculation
         user.exposure = calculateAllExposure(updatedPendingBets);
         user.avbalance = user.balance - user.exposure;
-        console.log('The avbalance is', user.avbalance);
 
         // CRITICAL SAFETY CHECK: PTI must never be negative
         if (user.avbalance < 0) {
           console.error(`[CRITICAL PTI ERROR] Casino avbalance went negative!`);
-
-          // Rollback by not saving - this is a critical error
           throw new Error(
             'Critical: PTI calculation error - casino bet rejected'
           );
         }
-      } else {
-        // Don't override fancy betting exposure calculation
-        console.log(
-          `[CASINO EXPOSURE] Skipped - no casino bets, preserving fancy exposure: ${user.exposure}`
-        );
       }
-
-      console.log(` [EXPOSURE DEBUG] Skipped for offset bet`);
     } else {
-      console.log(` [EXPOSURE DEBUG] Recalculating exposure for offset bet`);
-      user.skipExposureRecalculation = false; // Reset flag
-
       // Always recalculate exposure from pending bets using scenario-based logic
-      const offsetPendingBets = await betModel.find({
-        userId: id,
-        status: 0,
-      });
-      user.exposure = calculateAllExposure(offsetPendingBets);
+      user.exposure = calculateAllExposure(updatedPendingBets);
       user.avbalance = user.balance - user.exposure;
 
       // CRITICAL SAFETY CHECK: PTI must never be negative
@@ -820,31 +788,10 @@ const placeCasinoBet = async (req, res) => {
         console.error(
           `[CRITICAL PTI ERROR] Casino offset avbalance went negative!`
         );
-
-        // Rollback by not saving - this is a critical error
         throw new Error(
           'Critical: PTI calculation error - casino bet rejected'
         );
       }
-    }
-
-    //Save user with updated exposure and available balance
-    await user.save();
-    //Send WebSocket Updates
-    sendBalanceUpdates(user._id, user.avbalance);
-    sendExposureUpdates(user._id, user.exposure);
-    sendOpenBetsUpdates(user);
-
-    // Update all upline balances after bet placement
-    try {
-      console.time('CASINO_BET_UPLINE_UPDATE');
-      await updateAllUplines(user._id);
-      console.timeEnd('CASINO_BET_UPLINE_UPDATE');
-    } catch (err) {
-      console.error(
-        ` [CASINO BET] Error updating upline balances:`,
-        err.message
-      );
     }
 
     // Record bet history for every bet placed (individual tracking)
@@ -872,7 +819,26 @@ const placeCasinoBet = async (req, res) => {
       subtype,
     });
 
-    await betHistory.save();
+    // One round of writes, all at once. The user only changes these two fields, so a
+    // targeted update replaces loading, validating and saving a whole document.
+    const saveOperations = [
+      SubAdmin.updateOne(
+        { _id: user._id },
+        { $set: { avbalance: user.avbalance, exposure: user.exposure } }
+      ),
+      betHistory.save(),
+    ];
+    if (existingBet) saveOperations.push(existingBet.save());
+    if (newBet) saveOperations.push(newBet.save());
+    await Promise.all(saveOperations);
+
+    //Send WebSocket Updates (only to this user's own connections)
+    sendBalanceUpdates(user._id, user.avbalance);
+    sendExposureUpdates(user._id, user.exposure);
+    sendOpenBetsUpdates(user._id, null);
+
+    // Upline totals are recalculated in the background in batches
+    scheduleUplineUpdate(user._id);
 
     return res.status(201).json({
       message: 'Casino bet placed successfully',

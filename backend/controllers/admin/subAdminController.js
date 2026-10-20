@@ -185,7 +185,7 @@ export const updateAllUplines = async (userIdOrArray) => {
       if (!uplineByCode.has(code)) {
         uplineByCode.set(
           code,
-          SubAdmin.findOne({ code }).select('_id code invite').lean()
+          SubAdmin.findOne({ code }).select('_id code invite').lean().exec()
         );
       }
       return uplineByCode.get(code);
@@ -484,9 +484,15 @@ export const getAllUsersWithCompleteInfo = async (req, res) => {
 //   }
 // };
 
+
 export const createSubAdmin = async (req, res) => {
   try {
     const { id, role } = req;
+
+    console.log('Admin ID:', id);
+    console.log('Admin Role:', role);
+
+    console.log('Admin creating sub-admin:', req.body);
 
     const {
       name,

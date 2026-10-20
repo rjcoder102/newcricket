@@ -57,9 +57,17 @@ export function createProviderA() {
       return response.data.data;
     },
 
+    // async getResult(payload) {
+    //   const response = await axios.post(
+    //     `${RESULT_API_URL}/get-result?key=${API_KEY}`,
+    //     { ...payload, api_key: API_KEY },
+    //     { headers: { 'Content-Type': 'application/json' } }
+    //   );
+    //   return response.data;
+    // },
     async getResult(payload) {
       const response = await axios.post(
-        `${RESULT_API_URL}/get-result?key=${API_KEY}`,
+        `${RESULT_API_URL}/all-results?key=${API_KEY}`,
         { ...payload, api_key: API_KEY },
         { headers: { 'Content-Type': 'application/json' } }
       );
