@@ -7,10 +7,11 @@ import { fetchMatchData, fetchMatchList } from '../services/matchApi/index.js';
 dotenv.config();
 
 export const getCricketData = async (req, res) => {
+  console.log("getCricketData called");
   try {
     const data = await fetchMatchList(4);
 
-    // console.log("datadatadatadata", data)
+    console.log("datadatadatadata", data)
 
     if (data.success) {
       const t1 = data.data.t1 || [];
@@ -89,7 +90,7 @@ export const fetchCrirketBettingData = async (req, res) => {
         .json({ success: false, message: 'Invalid response from API' });
     }
   } catch (error) {
-    console.error('Error in fetchBettingData:', error.message);
+    console.error('Error in fetchCrirketBettingData:', error.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -104,7 +105,7 @@ export const getDiamondEvents = async (req, res) => {
       {
         headers: {
           "X-API-Key":
-            "sck_CZYAOnNE5fl8Mj-7w5KHtrEpuLEKVsPw",
+            "sck_Wr_0pAp2uAdClpn8uLulP-Iw849M_Lsq",
         },
       }
     );
@@ -137,7 +138,7 @@ export const getDiamondEventsData = async (req, res) => {
       {
         headers: {
           "X-API-Key":
-            "sck_CZYAOnNE5fl8Mj-7w5KHtrEpuLEKVsPw",
+            "sck_Wr_0pAp2uAdClpn8uLulP-Iw849M_Lsq",
         },
       }
     );

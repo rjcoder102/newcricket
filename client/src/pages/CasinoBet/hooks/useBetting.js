@@ -174,6 +174,13 @@ export const useBetting = ({ gameid, bettingData }) => {
         const result = await dispatch(createBet(updatedFormData));
 
         if (result.type === 'bet/create/fulfilled') {
+          // The bet is placed: release the slip and spinner right away. These
+          // refreshes only update what is shown, so they run in the background.
+          setBetAmount(0);
+          setBetControl(null);
+          setSelectedBet(null);
+          setLoader(false);
+
           dispatch(getUser());
           dispatch(getPendingBet());
           dispatch(
@@ -184,10 +191,9 @@ export const useBetting = ({ gameid, bettingData }) => {
               selectedVoid: 'unsettel',
             })
           );
-          await dispatch(getPendingBetAmo(gameid));
-          setBetAmount(0);
-          setBetControl(null);
-          setSelectedBet(null);
+          dispatch(
+            getPendingBetAmo({ gameId: gameid, roundId: bettingData?.mid })
+          );
         }
       } finally {
         setLoader(false);

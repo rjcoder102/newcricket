@@ -30,7 +30,7 @@ switch (PROVIDER) {
     break;
 }
 
-// console.log(`[API PROVIDER] Active provider: ${PROVIDER}`);
+console.log(`[API PROVIDER] Active provider: ${PROVIDER}`);
 
 export const fetchMatchList = (sportId) => activeProvider.fetchMatchList(sportId);
 export const fetchMatchData = (gameId, sportId) =>
